@@ -21,6 +21,8 @@ BLUE = (0, 0, 255)
 GREEN = (0, 255, 0)
 BROWN = (165, 42, 42)
 YELLOW = (255, 255, 0)
+PURPLE = (128, 0, 128)
+ORANGE = (255, 165, 0)
 
 # Ship class
 class Ship(pygame.sprite.Sprite):
@@ -73,7 +75,7 @@ class Bullet(pygame.sprite.Sprite):
 
 # Asteroid class
 class Asteroid(pygame.sprite.Sprite):
-    def __init__(self):
+    def __init__(self, level=1):
         super().__init__()
         # Create asteroid as a polygon
         size = random.randint(20, 50)
@@ -88,14 +90,27 @@ class Asteroid(pygame.sprite.Sprite):
             y = size/2 + radius * math.sin(angle)
             points.append((x, y))
         
-        # Draw the asteroid
-        pygame.draw.polygon(self.image, BROWN, points)
+        # Draw the asteroid with color based on level
+        if level == 1:
+            color = BROWN
+        elif level == 2:
+            color = ORANGE
+        elif level == 3:
+            color = PURPLE
+        else:
+            color = RED
+            
+        pygame.draw.polygon(self.image, color, points)
         
         self.rect = self.image.get_rect()
         self.rect.x = random.randrange(WIDTH - self.rect.width)
         self.rect.y = random.randrange(-100, -40)
-        self.speedy = random.randrange(1, 4)
-        self.speedx = random.randrange(-2, 2)
+        
+        # Base speed increased by 25% per level
+        base_speed = random.randrange(1, 4)
+        level_multiplier = 1 + (0.25 * (level - 1))
+        self.speedy = base_speed * level_multiplier
+        self.speedx = random.randrange(-2, 2) * level_multiplier
 
     def update(self):
         self.rect.y += self.speedy
@@ -218,10 +233,8 @@ def display_high_scores(high_scores):
     waiting = True
     while waiting:
         clock.tick(60)  # Limit the loop to 60 FPS
-        print("tick")
 
         for event in pygame.event.get():
-            print("got event")
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
@@ -371,9 +384,15 @@ def game():
     player = Ship(ship_img, ship_speed)
     all_sprites.add(player)
     
-    # Create asteroids
-    for i in range(8):
-        a = Asteroid()
+    # Level settings
+    level = 1
+    level_score_threshold_delta = 500
+    level_score_threshold = level_score_threshold_delta
+    asteroid_count = 8
+    
+    # Create asteroids for initial level
+    for i in range(asteroid_count):
+        a = Asteroid(level)
         all_sprites.add(a)
         asteroids.add(a)
     
@@ -385,50 +404,113 @@ def game():
     clock = pygame.time.Clock()
     running = True
     
+    # Level transition variables
+    level_transition = False
+    transition_start_time = 0
+    transition_duration = 2000  # 2 seconds
+    
     while running:
-        # Keep loop running at the right speed
+    
+       # Keep loop running at the right speed
         clock.tick(60)
         
         # Process input (events)
         for event in pygame.event.get():
+
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                elif event.key == pygame.K_SPACE:
+                elif event.key == pygame.K_SPACE and not level_transition:
                     bullet = player.shoot()
                     if bullet:
                         all_sprites.add(bullet)
                         bullets.add(bullet)
         
-        # Update
-        all_sprites.update()
+        # Check if we need to advance to the next level
+        if score >= level_score_threshold and not level_transition:
+            level += 1
+            level_transition = True
+
+            transition_start_time = pygame.time.get_ticks()
+            
+            # Clear existing asteroids
+            for asteroid in asteroids:
+                asteroid.kill()
+            
+            # Add more asteroids for the new level
+            asteroid_count += 2
+            level_score_threshold += level_score_threshold_delta  # Update threshold for next level
         
-        # Check for bullet/asteroid collisions
-        hits = pygame.sprite.groupcollide(asteroids, bullets, True, True)
-        for hit in hits:
-            score += 50
-            a = Asteroid()
-            all_sprites.add(a)
-            asteroids.add(a)
+        # Handle level transition
+        if level_transition:
+            current_time = pygame.time.get_ticks()
+            if current_time - transition_start_time > transition_duration:
+                level_transition = False
+                
+                # Create new asteroids for the new level
+                for i in range(asteroid_count):
+                    a = Asteroid(level)
+                    all_sprites.add(a)
+                    asteroids.add(a)
         
-        # Check for player/asteroid collisions
-        hits = pygame.sprite.spritecollide(player, asteroids, False)
-        if hits:
-            running = False
+        # Update sprites if not in level transition
+        if not level_transition:
+            all_sprites.update()
+            
+            # Check for bullet/asteroid collisions
+            hits = pygame.sprite.groupcollide(asteroids, bullets, True, True)
+            for hit in hits:
+                score += 50
+                a = Asteroid(level)
+                all_sprites.add(a)
+                asteroids.add(a)
+            
+            # Check for player/asteroid collisions
+            hits = pygame.sprite.spritecollide(player, asteroids, False)
+            if hits:
+                running = False
         
         # Draw / render
         screen.fill(BLACK)
-        all_sprites.draw(screen)
         
-        # Draw score
-        score_text = font.render(f"Score: {score}", True, WHITE)
-        screen.blit(score_text, (10, 10))
-        
-        # Draw player name
-        name_text = font.render(f"Player: {player_name}", True, WHITE)
-        screen.blit(name_text, (10, 50))
+        if level_transition:
+            # Draw level transition screen
+            level_font = pygame.font.Font(None, 72)
+            level_text = level_font.render(f"LEVEL {level}", True, YELLOW)
+            screen.blit(level_text, (WIDTH//2 - level_text.get_width()//2, HEIGHT//2 - 50))
+            
+            # Draw level description
+            desc_font = pygame.font.Font(None, 36)
+            if level == 2:
+                desc_text = desc_font.render("Faster asteroids!", True, WHITE)
+            elif level == 3:
+                desc_text = desc_font.render("Even more challenging!", True, WHITE)
+            else:
+                desc_text = desc_font.render("Ultimate challenge!", True, WHITE)
+            screen.blit(desc_text, (WIDTH//2 - desc_text.get_width()//2, HEIGHT//2 + 20))
+        else:
+            # Draw game elements
+            all_sprites.draw(screen)
+            
+            # Draw score
+            score_text = font.render(f"Score: {score}", True, WHITE)
+            screen.blit(score_text, (10, 10))
+            
+            # Draw level at top right
+            level_text = font.render(f"Level {level}", True, WHITE)
+            screen.blit(level_text, (WIDTH - level_text.get_width() - 10, 10))
+            
+            # Draw player name
+            name_text = font.render(f"Player: {player_name}", True, WHITE)
+            screen.blit(name_text, (10, 50))
+            
+            # Draw progress to next level
+            next_level_score = level_score_threshold
+            if level < 4:  # Cap at level 4
+                progress_text = font.render(f"Next level: {score}/{next_level_score}", True, WHITE)
+                screen.blit(progress_text, (WIDTH - progress_text.get_width() - 10, 50))
         
         # Flip the display
         pygame.display.flip()
@@ -444,14 +526,17 @@ def game():
     final_score = font.render(f"Final Score: {score}", True, WHITE)
     screen.blit(final_score, (WIDTH//2 - final_score.get_width()//2, HEIGHT//2 - 80))
     
+    level_reached = font.render(f"Level Reached: {level}", True, WHITE)
+    screen.blit(level_reached, (WIDTH//2 - level_reached.get_width()//2, HEIGHT//2 - 40))
+    
     player_name_text = font.render(f"Player: {player_name}", True, WHITE)
-    screen.blit(player_name_text, (WIDTH//2 - player_name_text.get_width()//2, HEIGHT//2 - 40))
+    screen.blit(player_name_text, (WIDTH//2 - player_name_text.get_width()//2, HEIGHT//2))
     
     high_score_text = font.render("Press H to view high scores", True, WHITE)
-    screen.blit(high_score_text, (WIDTH//2 - high_score_text.get_width()//2, HEIGHT//2 + 20))
+    screen.blit(high_score_text, (WIDTH//2 - high_score_text.get_width()//2, HEIGHT//2 + 40))
     
     restart_text = font.render("Press R to restart or ESC to quit", True, WHITE)
-    screen.blit(restart_text, (WIDTH//2 - restart_text.get_width()//2, HEIGHT//2 + 70))
+    screen.blit(restart_text, (WIDTH//2 - restart_text.get_width()//2, HEIGHT//2 + 80))
     
     pygame.display.flip()
     
