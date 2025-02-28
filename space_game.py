@@ -53,24 +53,65 @@ class Ship(pygame.sprite.Sprite):
         now = pygame.time.get_ticks()
         if now - self.last_shot > self.shoot_delay:
             self.last_shot = now
-            return Bullet(self.rect.centerx, self.rect.top)
+            return Bullet(self.rect.centerx, self.rect.top, -1)
+        return None
+
+# Enemy ship class
+class EnemyShip(pygame.sprite.Sprite):
+    def __init__(self, level=1):
+        super().__init__()
+        size = 40
+        self.image = pygame.Surface((size, size), pygame.SRCALPHA)
+        # Draw enemy ship as red inverted triangle
+        pygame.draw.polygon(self.image, RED, [(size//2, size), (0, 0), (size, 0)])
+        
+        self.rect = self.image.get_rect()
+        self.rect.x = random.randrange(WIDTH - self.rect.width)
+        self.rect.y = random.randrange(-100, -40)
+        
+        # Base speed increased by 25% per level
+        base_speed = random.randrange(1, 3)
+        level_multiplier = 1 + (0.25 * (level - 1))
+        self.speedy = base_speed * level_multiplier
+        self.speedx = random.randrange(-2, 2) * level_multiplier
+        
+        self.shoot_delay = 1500  # milliseconds
+        self.last_shot = pygame.time.get_ticks()
+
+    def update(self):
+        self.rect.y += self.speedy
+        self.rect.x += self.speedx
+        
+        # If enemy goes off screen, respawn it
+        if self.rect.top > HEIGHT + 10 or self.rect.left < -25 or self.rect.right > WIDTH + 25:
+            self.rect.x = random.randrange(WIDTH - self.rect.width)
+            self.rect.y = random.randrange(-100, -40)
+            self.speedy = random.randrange(1, 3)
+            self.speedx = random.randrange(-2, 2)
+    
+    def shoot(self):
+        now = pygame.time.get_ticks()
+        if now - self.last_shot > self.shoot_delay:
+            self.last_shot = now
+            return Bullet(self.rect.centerx, self.rect.bottom, 1, RED)
         return None
 
 # Bullet class
 class Bullet(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, direction, color=GREEN):
         super().__init__()
         self.image = pygame.Surface((5, 10))
-        self.image.fill(GREEN)
+        self.image.fill(color)
         self.rect = self.image.get_rect()
         self.rect.centerx = x
         self.rect.bottom = y
         self.speed = 10
+        self.direction = direction  # 1 for down (enemy), -1 for up (player)
 
     def update(self):
-        self.rect.y -= self.speed
-        # Kill if it moves off the top of the screen
-        if self.rect.bottom < 0:
+        self.rect.y += self.speed * self.direction
+        # Kill if it moves off the screen
+        if self.rect.bottom < 0 or self.rect.top > HEIGHT:
             self.kill()
 
 # Asteroid class
@@ -380,7 +421,9 @@ def game():
     # Create sprite groups
     all_sprites = pygame.sprite.Group()
     asteroids = pygame.sprite.Group()
-    bullets = pygame.sprite.Group()
+    enemy_ships = pygame.sprite.Group()
+    player_bullets = pygame.sprite.Group()
+    enemy_bullets = pygame.sprite.Group()
     
     # Create player ship
     player = Ship(ship_img, ship_speed)
@@ -390,13 +433,20 @@ def game():
     level = 1
     level_score_threshold_delta = 500
     level_score_threshold = level_score_threshold_delta
-    asteroid_count = 8
+    asteroid_count = 6
+    enemy_count = 2
     
     # Create asteroids for initial level
     for i in range(asteroid_count):
         a = Asteroid(level)
         all_sprites.add(a)
         asteroids.add(a)
+
+    # Create enemy ships for initial level
+    for i in range(enemy_count):
+        e = EnemyShip(level)
+        all_sprites.add(e)
+        enemy_ships.add(e)
     
     # Score
     score = 0
@@ -418,7 +468,6 @@ def game():
         
         # Process input (events)
         for event in pygame.event.get():
-
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
@@ -428,22 +477,24 @@ def game():
                     bullet = player.shoot()
                     if bullet:
                         all_sprites.add(bullet)
-                        bullets.add(bullet)
+                        player_bullets.add(bullet)
         
         # Check if we need to advance to the next level
         if score >= level_score_threshold and not level_transition:
             level += 1
             level_transition = True
-
             transition_start_time = pygame.time.get_ticks()
             
-            # Clear existing asteroids
+            # Clear existing asteroids and enemies
             for asteroid in asteroids:
                 asteroid.kill()
+            for enemy in enemy_ships:
+                enemy.kill()
             
-            # Add more asteroids for the new level
+            # Add more asteroids and enemies for the new level
             asteroid_count += 2
-            level_score_threshold += level_score_threshold_delta  # Update threshold for next level
+            enemy_count += 1
+            level_score_threshold += level_score_threshold_delta
         
         # Handle level transition
         if level_transition:
@@ -451,26 +502,56 @@ def game():
             if current_time - transition_start_time > transition_duration:
                 level_transition = False
                 
-                # Create new asteroids for the new level
+                # Create new asteroids and enemies for the new level
                 for i in range(asteroid_count):
                     a = Asteroid(level)
                     all_sprites.add(a)
                     asteroids.add(a)
+                
+                for i in range(enemy_count):
+                    e = EnemyShip(level)
+                    all_sprites.add(e)
+                    enemy_ships.add(e)
         
         # Update sprites if not in level transition
         if not level_transition:
             all_sprites.update()
             
+            # Enemy ships shoot
+            for enemy in enemy_ships:
+                bullet = enemy.shoot()
+                if bullet:
+                    all_sprites.add(bullet)
+                    enemy_bullets.add(bullet)
+            
             # Check for bullet/asteroid collisions
-            hits = pygame.sprite.groupcollide(asteroids, bullets, True, True)
+            hits = pygame.sprite.groupcollide(asteroids, player_bullets, True, True)
             for hit in hits:
                 score += 50
                 a = Asteroid(level)
                 all_sprites.add(a)
                 asteroids.add(a)
             
+            # Check for bullet/enemy ship collisions
+            hits = pygame.sprite.groupcollide(enemy_ships, player_bullets, True, True)
+            for hit in hits:
+                score += 100
+                e = EnemyShip(level)
+                all_sprites.add(e)
+                enemy_ships.add(e)
+            
             # Check for player/asteroid collisions
             hits = pygame.sprite.spritecollide(player, asteroids, False)
+            if hits:
+                running = False
+            
+            # Check for player/enemy bullet collisions
+            hits = pygame.sprite.spritecollide(player, enemy_bullets, True)
+            if hits:
+                running = False
+            
+            # Check for player/enemy ship collisions
+            hits = pygame.sprite.spritecollide(player, enemy_ships, False)
             if hits:
                 running = False
         
@@ -486,7 +567,7 @@ def game():
             # Draw level description
             desc_font = pygame.font.Font(None, 36)
             if level == 2:
-                desc_text = desc_font.render("Faster asteroids!", True, WHITE)
+                desc_text = desc_font.render("More enemies incoming!", True, WHITE)
             elif level == 3:
                 desc_text = desc_font.render("Even more challenging!", True, WHITE)
             else:
