@@ -190,9 +190,9 @@ def save_high_scores(scores):
         json.dump(scores, f)
 
 # Function to update high scores
-def update_high_scores(player_name, score):
+def update_high_scores(player_name, score, level):
     high_scores = load_high_scores()
-    high_scores.append({"name": player_name, "score": score})
+    high_scores.append({"name": player_name, "score": score, "level": level})
     # Sort by score (highest first) and keep only top 10
     high_scores = sorted(high_scores, key=lambda x: x["score"], reverse=True)[:10]
     save_high_scores(high_scores)
@@ -215,10 +215,12 @@ def display_high_scores(high_scores):
         rank_text = font.render(f"{i+1}.", True, WHITE)
         name_text = font.render(entry["name"], True, WHITE)
         score_text = font.render(str(entry["score"]), True, WHITE)
+        level_text = font.render(f"Level {entry.get('level', 1)}", True, WHITE)
         
-        screen.blit(rank_text, (WIDTH // 2 - 200, y_pos))
-        screen.blit(name_text, (WIDTH // 2 - 150, y_pos))
-        screen.blit(score_text, (WIDTH // 2 + 150, y_pos))
+        screen.blit(rank_text, (WIDTH // 2 - 250, y_pos))
+        screen.blit(name_text, (WIDTH // 2 - 200, y_pos))
+        screen.blit(score_text, (WIDTH // 2 + 50, y_pos))
+        screen.blit(level_text, (WIDTH // 2 + 150, y_pos))
         
         y_pos += 40
     
@@ -516,7 +518,7 @@ def game():
         pygame.display.flip()
     
     # Update high scores
-    high_scores = update_high_scores(player_name, score)
+    high_scores = update_high_scores(player_name, score, level)
     
     # Game over screen
     game_over_font = pygame.font.Font(None, 72)
