@@ -75,7 +75,7 @@ class EnemyShip(pygame.sprite.Sprite):
         self.speedy = base_speed * level_multiplier
         self.speedx = random.randrange(-2, 2) * level_multiplier
         
-        self.shoot_delay = 1500  # milliseconds
+        self.shoot_delay = max(300, 1500 - (level * 50))  # Shoot faster at higher levels
         self.last_shot = pygame.time.get_ticks()
 
     def update(self):
@@ -132,11 +132,11 @@ class Asteroid(pygame.sprite.Sprite):
             points.append((x, y))
         
         # Draw the asteroid with color based on level
-        if level == 1:
+        if level <= 3:
             color = BROWN
-        elif level == 2:
+        elif level <= 6:
             color = ORANGE
-        elif level == 3:
+        elif level <= 9:
             color = PURPLE
         else:
             color = RED
@@ -431,7 +431,7 @@ def game():
     
     # Level settings
     level = 1
-    level_score_threshold_delta = 500
+    level_score_threshold_delta = 500  # Score needed to advance to next level
     level_score_threshold = level_score_threshold_delta
     asteroid_count = 6
     enemy_count = 2
@@ -492,9 +492,9 @@ def game():
                 enemy.kill()
             
             # Add more asteroids and enemies for the new level
-            asteroid_count += 2
-            enemy_count += 1
-            level_score_threshold += level_score_threshold_delta
+            asteroid_count = 6 + level  # Scale with level
+            enemy_count = 2 + level // 2  # Add enemy every 2 levels
+            level_score_threshold += level_score_threshold_delta * (1 + level * 0.1)  # Increase score needed for next level
         
         # Handle level transition
         if level_transition:
@@ -527,7 +527,7 @@ def game():
             # Check for bullet/asteroid collisions
             hits = pygame.sprite.groupcollide(asteroids, player_bullets, True, True)
             for hit in hits:
-                score += 50
+                score += 50 * level  # Score scales with level
                 a = Asteroid(level)
                 all_sprites.add(a)
                 asteroids.add(a)
@@ -535,7 +535,7 @@ def game():
             # Check for bullet/enemy ship collisions
             hits = pygame.sprite.groupcollide(enemy_ships, player_bullets, True, True)
             for hit in hits:
-                score += 100
+                score += 100 * level  # Score scales with level
                 e = EnemyShip(level)
                 all_sprites.add(e)
                 enemy_ships.add(e)
@@ -566,12 +566,7 @@ def game():
             
             # Draw level description
             desc_font = pygame.font.Font(None, 36)
-            if level == 2:
-                desc_text = desc_font.render("More enemies incoming!", True, WHITE)
-            elif level == 3:
-                desc_text = desc_font.render("Even more challenging!", True, WHITE)
-            else:
-                desc_text = desc_font.render("Ultimate challenge!", True, WHITE)
+            desc_text = desc_font.render(f"Challenge Level {level}!", True, WHITE)
             screen.blit(desc_text, (WIDTH//2 - desc_text.get_width()//2, HEIGHT//2 + 20))
         else:
             # Draw game elements
@@ -591,9 +586,8 @@ def game():
             
             # Draw progress to next level
             next_level_score = level_score_threshold
-            if level < 4:  # Cap at level 4
-                progress_text = font.render(f"Next level: {score}/{next_level_score}", True, WHITE)
-                screen.blit(progress_text, (WIDTH - progress_text.get_width() - 10, 50))
+            progress_text = font.render(f"Next level: {score}/{next_level_score}", True, WHITE)
+            screen.blit(progress_text, (WIDTH - progress_text.get_width() - 10, 50))
         
         # Flip the display
         pygame.display.flip()
