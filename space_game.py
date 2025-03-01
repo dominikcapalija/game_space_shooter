@@ -494,7 +494,9 @@ def game():
             # Add more asteroids and enemies for the new level
             asteroid_count = 6 + level  # Scale with level
             enemy_count = 2 + level // 2  # Add enemy every 2 levels
-            level_score_threshold += level_score_threshold_delta * (1 + level * 0.1)  # Increase score needed for next level
+            
+            # Make level progression more consistent by using a fixed increment
+            level_score_threshold += level_score_threshold_delta  # Fixed score increment per level
         
         # Handle level transition
         if level_transition:
@@ -527,7 +529,7 @@ def game():
             # Check for bullet/asteroid collisions
             hits = pygame.sprite.groupcollide(asteroids, player_bullets, True, True)
             for hit in hits:
-                score += 50 * level  # Score scales with level
+                score += 50  # Fixed score per asteroid
                 a = Asteroid(level)
                 all_sprites.add(a)
                 asteroids.add(a)
@@ -535,7 +537,7 @@ def game():
             # Check for bullet/enemy ship collisions
             hits = pygame.sprite.groupcollide(enemy_ships, player_bullets, True, True)
             for hit in hits:
-                score += 100 * level  # Score scales with level
+                score += 100  # Fixed score per enemy ship
                 e = EnemyShip(level)
                 all_sprites.add(e)
                 enemy_ships.add(e)
