@@ -24,6 +24,38 @@ YELLOW = (255, 255, 0)
 PURPLE = (128, 0, 128)
 ORANGE = (255, 165, 0)
 
+# PowerUp class
+class PowerUp(pygame.sprite.Sprite):
+    RAPID_FIRE = "rapid_fire"
+    DOUBLE_SHOT = "double_shot"
+    
+    def __init__(self, x, y):
+        super().__init__()
+        self.type = random.choice([PowerUp.RAPID_FIRE, PowerUp.DOUBLE_SHOT])
+        self.size = 20
+        self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        
+        if self.type == PowerUp.RAPID_FIRE:
+            color = YELLOW
+            # Draw lightning bolt
+            points = [(10, 0), (20, 8), (13, 12), (20, 20), (0, 12), (7, 8)]
+            pygame.draw.polygon(self.image, color, points)
+        else:  # DOUBLE_SHOT
+            color = PURPLE
+            # Draw double circle
+            pygame.draw.circle(self.image, color, (5, 10), 5)
+            pygame.draw.circle(self.image, color, (15, 10), 5)
+        
+        self.rect = self.image.get_rect()
+        self.rect.x = x
+        self.rect.y = y
+        self.speedy = 3
+    
+    def update(self):
+        self.rect.y += self.speedy
+        if self.rect.top > HEIGHT:
+            self.kill()
+
 # Ship class
 class Ship(pygame.sprite.Sprite):
     def __init__(self, image, speed):
@@ -33,8 +65,14 @@ class Ship(pygame.sprite.Sprite):
         self.rect.centerx = WIDTH // 2
         self.rect.bottom = HEIGHT - 10
         self.speed = speed
-        self.shoot_delay = 250  # milliseconds
+        self.base_shoot_delay = 250  # milliseconds
+        self.shoot_delay = self.base_shoot_delay
         self.last_shot = pygame.time.get_ticks()
+        
+        # Power-up attributes
+        self.power_ups = set()
+        self.power_up_start = 0
+        self.power_up_duration = 30000  # 30 seconds
 
     def update(self):
         keys = pygame.key.get_pressed()
@@ -48,13 +86,34 @@ class Ship(pygame.sprite.Sprite):
             self.rect.left = 0
         if self.rect.right > WIDTH:
             self.rect.right = WIDTH
+            
+        # Check power-up duration
+        now = pygame.time.get_ticks()
+        if self.power_ups and now - self.power_up_start > self.power_up_duration:
+            self.power_ups.clear()
+            self.shoot_delay = self.base_shoot_delay
     
     def shoot(self):
         now = pygame.time.get_ticks()
         if now - self.last_shot > self.shoot_delay:
             self.last_shot = now
-            return Bullet(self.rect.centerx, self.rect.top, -1)
-        return None
+            if PowerUp.DOUBLE_SHOT in self.power_ups:
+                # Return list of two bullets side by side
+                return [
+                    Bullet(self.rect.left + 10, self.rect.top, -1),
+                    Bullet(self.rect.right - 10, self.rect.top, -1)
+                ]
+            else:
+                # Return single bullet as a list for consistency
+                return [Bullet(self.rect.centerx, self.rect.top, -1)]
+        return []
+    
+    def add_power_up(self, power_up_type):
+        self.power_ups.add(power_up_type)
+        self.power_up_start = pygame.time.get_ticks()
+        
+        if power_up_type == PowerUp.RAPID_FIRE:
+            self.shoot_delay = self.base_shoot_delay // 2  # Twice as fast
 
 # Enemy ship class
 class EnemyShip(pygame.sprite.Sprite):
@@ -424,6 +483,7 @@ def game():
     enemy_ships = pygame.sprite.Group()
     player_bullets = pygame.sprite.Group()
     enemy_bullets = pygame.sprite.Group()
+    power_ups = pygame.sprite.Group()  # New group for power-ups
     
     # Create player ship
     player = Ship(ship_img, ship_speed)
@@ -435,6 +495,11 @@ def game():
     level_score_threshold = level_score_threshold_delta
     asteroid_count = 6
     enemy_count = 2
+    
+    # Power-up settings
+    power_up_chance = 0.15  # 15% chance per destroyed object
+    last_power_up_time = pygame.time.get_ticks()
+    power_up_min_delay = 5000  # Minimum 5 seconds between power-ups
     
     # Create asteroids for initial level
     for i in range(asteroid_count):
@@ -462,8 +527,7 @@ def game():
     transition_duration = 2000  # 2 seconds
     
     while running:
-    
-       # Keep loop running at the right speed
+        # Keep loop running at the right speed
         clock.tick(60)
         
         # Process input (events)
@@ -474,8 +538,8 @@ def game():
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_SPACE and not level_transition:
-                    bullet = player.shoot()
-                    if bullet:
+                    bullets = player.shoot()
+                    for bullet in bullets:
                         all_sprites.add(bullet)
                         player_bullets.add(bullet)
         
@@ -490,6 +554,8 @@ def game():
                 asteroid.kill()
             for enemy in enemy_ships:
                 enemy.kill()
+            for power_up in power_ups:  # Clear power-ups between levels
+                power_up.kill()
             
             # Add more asteroids and enemies for the new level
             asteroid_count = 6 + level  # Scale with level
@@ -530,6 +596,16 @@ def game():
             hits = pygame.sprite.groupcollide(asteroids, player_bullets, True, True)
             for hit in hits:
                 score += 50  # Fixed score per asteroid
+                
+                # Chance to spawn power-up
+                now = pygame.time.get_ticks()
+                if (random.random() < power_up_chance and 
+                    now - last_power_up_time > power_up_min_delay):
+                    power_up = PowerUp(hit.rect.centerx, hit.rect.centery)
+                    all_sprites.add(power_up)
+                    power_ups.add(power_up)
+                    last_power_up_time = now
+                
                 a = Asteroid(level)
                 all_sprites.add(a)
                 asteroids.add(a)
@@ -538,9 +614,24 @@ def game():
             hits = pygame.sprite.groupcollide(enemy_ships, player_bullets, True, True)
             for hit in hits:
                 score += 100  # Fixed score per enemy ship
+                
+                # Chance to spawn power-up
+                now = pygame.time.get_ticks()
+                if (random.random() < 0.20 and  # 20% chance from enemy ships
+                    now - last_power_up_time > power_up_min_delay):
+                    power_up = PowerUp(hit.rect.centerx, hit.rect.centery)
+                    all_sprites.add(power_up)
+                    power_ups.add(power_up)
+                    last_power_up_time = now
+                
                 e = EnemyShip(level)
                 all_sprites.add(e)
                 enemy_ships.add(e)
+            
+            # Check for player/power-up collisions
+            hits = pygame.sprite.spritecollide(player, power_ups, True)
+            for hit in hits:
+                player.add_power_up(hit.type)
             
             # Check for player/asteroid collisions
             hits = pygame.sprite.spritecollide(player, asteroids, False)
@@ -590,6 +681,23 @@ def game():
             next_level_score = level_score_threshold
             progress_text = font.render(f"Next level: {score}/{next_level_score}", True, WHITE)
             screen.blit(progress_text, (WIDTH - progress_text.get_width() - 10, 50))
+            
+            # Draw active power-ups
+            if player.power_ups:
+                power_up_text = []
+                if PowerUp.RAPID_FIRE in player.power_ups:
+                    power_up_text.append("RAPID FIRE")
+                if PowerUp.DOUBLE_SHOT in player.power_ups:
+                    power_up_text.append("DOUBLE SHOT")
+                if power_up_text:
+                    power_up_display = font.render(" + ".join(power_up_text), True, YELLOW)
+                    screen.blit(power_up_display, (10, 90))
+                    
+                # Draw power-up timer
+                remaining = (player.power_up_duration - (pygame.time.get_ticks() - player.power_up_start)) // 1000
+                if remaining > 0:
+                    timer_text = font.render(f"({remaining}s)", True, YELLOW)
+                    screen.blit(timer_text, (10, 120))
         
         # Flip the display
         pygame.display.flip()
