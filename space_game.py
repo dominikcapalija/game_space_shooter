@@ -24,14 +24,71 @@ YELLOW = (255, 255, 0)
 PURPLE = (128, 0, 128)
 ORANGE = (255, 165, 0)
 
+# Explosion class
+class Explosion(pygame.sprite.Sprite):
+    def __init__(self, center_x, center_y):
+        super().__init__()
+        self.radius = 250  # Explosion radius increased to 250
+        self.current_radius = 0
+        self.growth_rate = 25  # Increased to match larger radius
+        self.max_frames = 10
+        self.frame = 0
+        self.center_x = center_x
+        self.center_y = center_y
+        
+        # Create surface for explosion
+        self.image = pygame.Surface((self.radius * 2, self.radius * 2), pygame.SRCALPHA)
+        self.rect = self.image.get_rect()
+        self.rect.center = (center_x, center_y)
+    
+    def update(self):
+        self.frame += 1
+        if self.frame > self.max_frames:
+            self.kill()
+            return
+        
+        self.current_radius = int((self.frame / self.max_frames) * self.radius)
+        self.image.fill((0, 0, 0, 0))  # Clear with transparent
+        pygame.draw.circle(self.image, (*ORANGE, 128), (self.radius, self.radius), self.current_radius)
+
+# StrayBomb class
+class StrayBomb(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__()
+        self.size = 40  # Increased size to accommodate larger radius
+        self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        
+        # Draw bomb as red circle with fuse
+        pygame.draw.circle(self.image, RED, (self.size//2, self.size//2), 20)  # Radius increased to 20
+        pygame.draw.line(self.image, YELLOW, (self.size//2, 0), (self.size//2, self.size//4), 2)
+        
+        self.rect = self.image.get_rect()
+        self.rect.x = x
+        self.rect.y = y
+        self.speedy = random.randint(1, 3)
+        self.speedx = random.randint(-2, 2)
+    
+    def update(self):
+        self.rect.y += self.speedy
+        self.rect.x += self.speedx
+        
+        # Bounce off screen edges
+        if self.rect.left < 0 or self.rect.right > WIDTH:
+            self.speedx = -self.speedx
+        
+        # Kill if moves off bottom of screen
+        if self.rect.top > HEIGHT:
+            self.kill()
+
 # PowerUp class
 class PowerUp(pygame.sprite.Sprite):
     RAPID_FIRE = "rapid_fire"
     DOUBLE_SHOT = "double_shot"
+    STRAY_BOMB = "stray_bomb"  # New power-up type
     
     def __init__(self, x, y):
         super().__init__()
-        self.type = random.choice([PowerUp.RAPID_FIRE, PowerUp.DOUBLE_SHOT])
+        self.type = random.choice([PowerUp.RAPID_FIRE, PowerUp.DOUBLE_SHOT, PowerUp.STRAY_BOMB])
         self.size = 20
         self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
         
@@ -40,11 +97,16 @@ class PowerUp(pygame.sprite.Sprite):
             # Draw lightning bolt
             points = [(10, 0), (20, 8), (13, 12), (20, 20), (0, 12), (7, 8)]
             pygame.draw.polygon(self.image, color, points)
-        else:  # DOUBLE_SHOT
+        elif self.type == PowerUp.DOUBLE_SHOT:
             color = PURPLE
             # Draw double circle
             pygame.draw.circle(self.image, color, (5, 10), 5)
             pygame.draw.circle(self.image, color, (15, 10), 5)
+        else:  # STRAY_BOMB
+            color = RED
+            # Draw bomb icon
+            pygame.draw.circle(self.image, color, (self.size//2, self.size//2), self.size//2 - 2)
+            pygame.draw.line(self.image, YELLOW, (self.size//2, 0), (self.size//2, self.size//4), 2)
         
         self.rect = self.image.get_rect()
         self.rect.x = x
@@ -72,7 +134,10 @@ class Ship(pygame.sprite.Sprite):
         # Power-up attributes
         self.power_ups = set()
         self.power_up_start = 0
-        self.power_up_duration = 30000  # 30 seconds
+        self.power_up_duration = 50000  # 50 seconds
+        
+        # Bomb attributes
+        self.has_bomb = False
 
     def update(self):
         keys = pygame.key.get_pressed()
@@ -483,7 +548,9 @@ def game():
     enemy_ships = pygame.sprite.Group()
     player_bullets = pygame.sprite.Group()
     enemy_bullets = pygame.sprite.Group()
-    power_ups = pygame.sprite.Group()  # New group for power-ups
+    power_ups = pygame.sprite.Group()
+    bombs = pygame.sprite.Group()  # New group for bombs
+    explosions = pygame.sprite.Group()  # New group for explosions
     
     # Create player ship
     player = Ship(ship_img, ship_speed)
@@ -491,15 +558,19 @@ def game():
     
     # Level settings
     level = 1
-    level_score_threshold_delta = 500  # Score needed to advance to next level
+    level_score_threshold_delta = 1000  # Score needed to advance to next level
     level_score_threshold = level_score_threshold_delta
     asteroid_count = 6
     enemy_count = 2
     
     # Power-up settings
-    power_up_chance = 0.15  # 15% chance per destroyed object
+    power_up_chance = 0.25  # 25% chance per destroyed object
     last_power_up_time = pygame.time.get_ticks()
     power_up_min_delay = 5000  # Minimum 5 seconds between power-ups
+    
+    # Bomb spawn settings
+    bomb_spawn_delay = 5000  # 5 seconds between bomb spawns
+    last_bomb_time = pygame.time.get_ticks()
     
     # Create asteroids for initial level
     for i in range(asteroid_count):
@@ -524,7 +595,7 @@ def game():
     # Level transition variables
     level_transition = False
     transition_start_time = 0
-    transition_duration = 2000  # 2 seconds
+    transition_duration = 1000  # 1 second
     
     while running:
         # Keep loop running at the right speed
@@ -543,26 +614,31 @@ def game():
                         all_sprites.add(bullet)
                         player_bullets.add(bullet)
         
+        # Spawn new bomb periodically
+        now = pygame.time.get_ticks()
+        if now - last_bomb_time > bomb_spawn_delay:
+            bomb = StrayBomb(random.randint(0, WIDTH-20), -20)
+            all_sprites.add(bomb)
+            bombs.add(bomb)
+            last_bomb_time = now
+        
         # Check if we need to advance to the next level
         if score >= level_score_threshold and not level_transition:
             level += 1
             level_transition = True
             transition_start_time = pygame.time.get_ticks()
             
-            # Clear existing asteroids and enemies
-            for asteroid in asteroids:
-                asteroid.kill()
-            for enemy in enemy_ships:
-                enemy.kill()
-            for power_up in power_ups:  # Clear power-ups between levels
-                power_up.kill()
+            # Clear existing objects
+            for sprite in [asteroids, enemy_ships, power_ups, bombs]:
+                for obj in sprite:
+                    obj.kill()
             
             # Add more asteroids and enemies for the new level
             asteroid_count = 6 + level  # Scale with level
             enemy_count = 2 + level // 2  # Add enemy every 2 levels
             
             # Make level progression more consistent by using a fixed increment
-            level_score_threshold += level_score_threshold_delta  # Fixed score increment per level
+            level_score_threshold += level_score_threshold_delta
         
         # Handle level transition
         if level_transition:
@@ -592,13 +668,69 @@ def game():
                     all_sprites.add(bullet)
                     enemy_bullets.add(bullet)
             
+            # Check for bomb collisions with all objects and create explosions
+            # Bomb collision with asteroids
+            hits = pygame.sprite.groupcollide(bombs, asteroids, True, True)
+            for bomb in hits:
+                explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
+                all_sprites.add(explosion)
+                explosions.add(explosion)
+                score += 25  # Bonus points for explosion kills
+                a = Asteroid(level)  # Respawn asteroid
+                all_sprites.add(a)
+                asteroids.add(a)
+            
+            # Bomb collision with enemy ships
+            hits = pygame.sprite.groupcollide(bombs, enemy_ships, True, True)
+            for bomb in hits:
+                explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
+                all_sprites.add(explosion)
+                explosions.add(explosion)
+                score += 25  # Bonus points for explosion kills
+                e = EnemyShip(level)  # Respawn enemy ship
+                all_sprites.add(e)
+                enemy_ships.add(e)
+            
+            # Bomb collision with enemy bullets
+            hits = pygame.sprite.groupcollide(bombs, enemy_bullets, True, True)
+            for bomb in hits:
+                explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
+                all_sprites.add(explosion)
+                explosions.add(explosion)
+            
+            # Check for bullet/bomb collisions and create explosions
+            hits = pygame.sprite.groupcollide(bombs, player_bullets, True, True)
+            for bomb in hits:
+                explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
+                all_sprites.add(explosion)
+                explosions.add(explosion)
+                
+                # Check what's caught in explosion radius
+                for sprite_group in [asteroids, enemy_ships, enemy_bullets, power_ups, bombs]:
+                    for sprite in sprite_group:
+                        distance = math.sqrt(
+                            (sprite.rect.centerx - explosion.center_x) ** 2 +
+                            (sprite.rect.centery - explosion.center_y) ** 2
+                        )
+                        if distance <= explosion.radius:
+                            if sprite_group == asteroids or sprite_group == enemy_ships:
+                                score += 25  # Bonus points for explosion kills
+                            sprite.kill()
+                
+                # Check if player is caught in explosion
+                player_distance = math.sqrt(
+                    (player.rect.centerx - explosion.center_x) ** 2 +
+                    (player.rect.centery - explosion.center_y) ** 2
+                )
+                if player_distance <= explosion.radius:
+                    running = False
+            
             # Check for bullet/asteroid collisions
             hits = pygame.sprite.groupcollide(asteroids, player_bullets, True, True)
             for hit in hits:
-                score += 50  # Fixed score per asteroid
+                score += 50
                 
                 # Chance to spawn power-up
-                now = pygame.time.get_ticks()
                 if (random.random() < power_up_chance and 
                     now - last_power_up_time > power_up_min_delay):
                     power_up = PowerUp(hit.rect.centerx, hit.rect.centery)
@@ -613,11 +745,10 @@ def game():
             # Check for bullet/enemy ship collisions
             hits = pygame.sprite.groupcollide(enemy_ships, player_bullets, True, True)
             for hit in hits:
-                score += 100  # Fixed score per enemy ship
+                score += 100
                 
                 # Chance to spawn power-up
-                now = pygame.time.get_ticks()
-                if (random.random() < 0.20 and  # 20% chance from enemy ships
+                if (random.random() < 0.30 and  # 30% chance from enemy ships
                     now - last_power_up_time > power_up_min_delay):
                     power_up = PowerUp(hit.rect.centerx, hit.rect.centery)
                     all_sprites.add(power_up)
@@ -628,25 +759,37 @@ def game():
                 all_sprites.add(e)
                 enemy_ships.add(e)
             
+            # Check for player collisions with bombs first
+            bomb_hits = pygame.sprite.spritecollide(player, bombs, True)
+            if bomb_hits:
+                for bomb in bomb_hits:
+                    explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
+                    all_sprites.add(explosion)
+                    explosions.add(explosion)
+                    
+                    # Check what's caught in explosion radius
+                    for sprite_group in [asteroids, enemy_ships, enemy_bullets, power_ups, bombs]:
+                        for sprite in sprite_group:
+                            distance = math.sqrt(
+                                (sprite.rect.centerx - explosion.center_x) ** 2 +
+                                (sprite.rect.centery - explosion.center_y) ** 2
+                            )
+                            if distance <= explosion.radius:
+                                if sprite_group == asteroids or sprite_group == enemy_ships:
+                                    score += 25  # Bonus points for explosion kills
+                                sprite.kill()
+                running = False
+            
             # Check for player/power-up collisions
             hits = pygame.sprite.spritecollide(player, power_ups, True)
             for hit in hits:
                 player.add_power_up(hit.type)
             
-            # Check for player/asteroid collisions
-            hits = pygame.sprite.spritecollide(player, asteroids, False)
-            if hits:
-                running = False
-            
-            # Check for player/enemy bullet collisions
-            hits = pygame.sprite.spritecollide(player, enemy_bullets, True)
-            if hits:
-                running = False
-            
-            # Check for player/enemy ship collisions
-            hits = pygame.sprite.spritecollide(player, enemy_ships, False)
-            if hits:
-                running = False
+            # Check for player collisions with other hazards
+            for hazard_group in [asteroids, enemy_ships, enemy_bullets]:
+                hits = pygame.sprite.spritecollide(player, hazard_group, False)
+                if hits:
+                    running = False
         
         # Draw / render
         screen.fill(BLACK)
@@ -689,6 +832,8 @@ def game():
                     power_up_text.append("RAPID FIRE")
                 if PowerUp.DOUBLE_SHOT in player.power_ups:
                     power_up_text.append("DOUBLE SHOT")
+                if PowerUp.STRAY_BOMB in player.power_ups:
+                    power_up_text.append("STRAY BOMB")
                 if power_up_text:
                     power_up_display = font.render(" + ".join(power_up_text), True, YELLOW)
                     screen.blit(power_up_display, (10, 90))
