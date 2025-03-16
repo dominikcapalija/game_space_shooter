@@ -44,38 +44,106 @@ def create_simple_sound(frequency, duration, volume=0.5, sound_type='sine'):
         t = float(i) / sample_rate
         
         if sound_type == 'laser':
-            # Laser sound: frequency sweep from high to low with decay
+            # Laser sound: frequency sweep from high to low with harmonics
             freq = frequency * (1.0 - t/duration * 0.5)  # Sweep down
             decay = 1.0 - t/duration
-            sample = int(max_sample * volume * decay * math.sin(2.0 * math.pi * freq * t))
+            # Add harmonics for richer sound
+            sample = int(max_sample * volume * decay * (
+                0.7 * math.sin(2.0 * math.pi * freq * t) +
+                0.2 * math.sin(2.0 * math.pi * freq * 2 * t) +  # First harmonic
+                0.1 * math.sin(2.0 * math.pi * freq * 3 * t)    # Second harmonic
+            ))
         
         elif sound_type == 'explosion':
-            # Explosion: noise with low frequency rumble and fast decay
-            noise = random.uniform(-1, 1)
-            rumble = math.sin(2.0 * math.pi * 30 * t)  # 30 Hz rumble
-            decay = math.exp(-10 * t/duration)
-            sample = int(max_sample * volume * decay * (0.7 * noise + 0.3 * rumble))
+            # Massive explosion: multiple layers of noise, deep bass rumble, and shockwave effect
+            
+            # Initial blast wave (high frequency content with very sharp attack)
+            blast = random.uniform(-1, 1) * math.exp(-30 * t/duration)
+            
+            # Multiple rumble frequencies for rich bass
+            rumble_freqs = [20, 40, 60, 80]  # Very low frequencies for deep rumble
+            rumble = sum(math.sin(2.0 * math.pi * freq * t) * math.exp(-3 * t/duration)
+                        for freq in rumble_freqs) / len(rumble_freqs)
+            
+            # Debris sound (mid-high frequency noise)
+            debris = sum(random.uniform(-1, 1) * math.sin(2.0 * math.pi * freq * t)
+                        for freq in [500, 1000, 2000]) / 3.0
+            
+            # Shockwave effect (amplitude modulation)
+            shockwave = math.exp(-5 * t/duration) * (1.0 + 0.5 * math.sin(2.0 * math.pi * 30 * t))
+            
+            # Complex decay envelope
+            if t < duration * 0.1:  # Initial blast (10% of duration)
+                decay = 1.0  # Full volume
+            elif t < duration * 0.3:  # Quick decay (next 20%)
+                decay = 1.0 - 0.5 * ((t - 0.1 * duration) / (0.2 * duration))
+            else:  # Long tail (remaining 70%)
+                decay = 0.5 * math.exp(-2 * (t - 0.3 * duration) / (0.7 * duration))
+            
+            # Mix all components with different weights
+            sample = int(max_sample * volume * decay * (
+                0.4 * blast +           # Sharp initial blast
+                0.3 * rumble +          # Deep bass rumble
+                0.2 * debris +          # Mid-high debris sounds
+                0.1 * shockwave         # Amplitude modulation
+            ))
         
         elif sound_type == 'collision':
-            # Collision: mix of frequencies with quick decay
-            f1 = frequency
-            f2 = frequency * 1.5
-            decay = math.exp(-20 * t/duration)
-            sample = int(max_sample * volume * decay * (
-                0.6 * math.sin(2.0 * math.pi * f1 * t) +
-                0.4 * math.sin(2.0 * math.pi * f2 * t)
+            # Enhanced collision: metallic impact with resonance and debris
+            
+            # Multiple impact frequencies for metallic sound
+            frequencies = [
+                frequency,          # Base frequency
+                frequency * 1.5,    # Perfect fifth
+                frequency * 2.0,    # Octave
+                frequency * 2.5,    # Octave + fifth
+                frequency * 3.0     # Two octaves
+            ]
+            
+            # Initial impact (very fast attack)
+            attack = min(1.0, t * 200)  # Twice as fast attack
+            
+            # Complex decay with different rates for each frequency
+            decay_base = math.exp(-15 * t/duration)
+            decay_rates = [1.0, 1.2, 1.5, 2.0, 2.5]  # Different decay rates
+            
+            # Metallic ringing frequencies
+            metallic = sum(
+                amp * math.sin(2.0 * math.pi * freq * t) * math.exp(-rate * 15 * t/duration)
+                for freq, rate, amp in zip(frequencies, decay_rates, [0.4, 0.25, 0.15, 0.1, 0.1])
+            )
+            
+            # Add some noise for impact crunch
+            impact_noise = random.uniform(-1, 1) * math.exp(-30 * t/duration)
+            
+            # Combine metallic ringing with impact noise
+            sample = int(max_sample * volume * attack * (
+                0.8 * metallic +     # Metallic ringing
+                0.2 * impact_noise   # Impact crunch
             ))
         
         elif sound_type == 'powerup':
-            # Power-up: ascending frequency with wobble
-            freq = frequency * (1.0 + t/duration)  # Sweep up
-            wobble = 1.0 + 0.2 * math.sin(2.0 * math.pi * 10 * t)  # Add wobble
-            sample = int(max_sample * volume * math.sin(2.0 * math.pi * freq * t * wobble))
+            # Power-up: ascending frequency with harmonics and shimmer
+            base_freq = frequency * (1.0 + t/duration * 1.5)  # Bigger frequency sweep
+            # Add shimmer effect
+            shimmer = 1.0 + 0.3 * math.sin(2.0 * math.pi * 15 * t)  # Faster wobble
+            sparkle = 0.2 * math.sin(2.0 * math.pi * 1000 * t)  # High frequency sparkle
+            
+            # Combine multiple frequency components
+            sample = int(max_sample * volume * (
+                0.6 * math.sin(2.0 * math.pi * base_freq * t * shimmer) +
+                0.3 * math.sin(2.0 * math.pi * base_freq * 1.5 * t) +
+                0.1 * sparkle
+            ))
         
         else:  # Default sine wave
             sample = int(max_sample * volume * math.sin(2.0 * math.pi * frequency * t))
         
-        sound_buffer[i] = [sample, sample]  # Same value for both channels
+        # Enhanced stereo effect with more separation
+        pan_amount = 0.2  # Increased stereo separation
+        left_sample = int(sample * (1.0 + pan_amount * math.sin(2.0 * math.pi * 2 * t)))
+        right_sample = int(sample * (1.0 + pan_amount * math.cos(2.0 * math.pi * 2 * t)))
+        sound_buffer[i] = [left_sample, right_sample]
     
     return pygame.sndarray.make_sound(sound_buffer)
 
@@ -87,18 +155,18 @@ class SoundManager:
         if cls._instance is None:
             cls._instance = super(SoundManager, cls).__new__(cls)
             try:
-                # Create sound effects directly in memory with improved sounds
-                cls._instance.laser_sound = create_simple_sound(2000, 0.15, 0.3, 'laser')  # Higher pitch, longer
-                cls._instance.explosion_sound = create_simple_sound(100, 0.4, 0.5, 'explosion')  # Lower, longer
-                cls._instance.collision_sound = create_simple_sound(400, 0.15, 0.4, 'collision')  # Complex sound
-                cls._instance.powerup_sound = create_simple_sound(600, 0.25, 0.4, 'powerup')  # Ascending with wobble
+                # Create sound effects with enhanced sounds
+                cls._instance.laser_sound = create_simple_sound(2000, 0.2, 0.3, 'laser')
+                cls._instance.explosion_sound = create_simple_sound(60, 1.0, 0.8, 'explosion')  # Longer, louder, deeper
+                cls._instance.collision_sound = create_simple_sound(200, 0.4, 0.7, 'collision')  # Longer, louder, deeper
+                cls._instance.powerup_sound = create_simple_sound(600, 0.3, 0.4, 'powerup')
                 
                 cls._instance.enabled = True
                 print("Sound manager initialized successfully")
                 
                 # Test sound
-                cls._instance.laser_sound.play()
-                pygame.time.wait(100)  # Wait for sound to play
+                cls._instance.explosion_sound.play()
+                pygame.time.wait(100)
                 print("Test sound played")
             except Exception as e:
                 print(f"Warning: Could not initialize sound manager: {e}")
@@ -237,11 +305,10 @@ class StrayBomb(pygame.sprite.Sprite):
 class PowerUp(pygame.sprite.Sprite):
     RAPID_FIRE = "rapid_fire"
     DOUBLE_SHOT = "double_shot"
-    STRAY_BOMB = "stray_bomb"  # New power-up type
     
     def __init__(self, x, y):
         super().__init__()
-        self.type = random.choice([PowerUp.RAPID_FIRE, PowerUp.DOUBLE_SHOT, PowerUp.STRAY_BOMB])
+        self.type = random.choice([PowerUp.RAPID_FIRE, PowerUp.DOUBLE_SHOT])
         self.size = 20
         self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
         
@@ -250,16 +317,11 @@ class PowerUp(pygame.sprite.Sprite):
             # Draw lightning bolt
             points = [(10, 0), (20, 8), (13, 12), (20, 20), (0, 12), (7, 8)]
             pygame.draw.polygon(self.image, color, points)
-        elif self.type == PowerUp.DOUBLE_SHOT:
+        else:  # DOUBLE_SHOT
             color = PURPLE
             # Draw double circle
             pygame.draw.circle(self.image, color, (5, 10), 5)
             pygame.draw.circle(self.image, color, (15, 10), 5)
-        else:  # STRAY_BOMB
-            color = RED
-            # Draw bomb icon
-            pygame.draw.circle(self.image, color, (self.size//2, self.size//2), self.size//2 - 2)
-            pygame.draw.line(self.image, YELLOW, (self.size//2, 0), (self.size//2, self.size//4), 2)
         
         self.rect = self.image.get_rect()
         self.rect.x = x
@@ -443,6 +505,331 @@ class Asteroid(pygame.sprite.Sprite):
             self.rect.y = random.randrange(-100, -40)
             self.speedy = random.randrange(1, 4)
             self.speedx = random.randrange(-2, 2)
+
+# Boss class
+class Boss(pygame.sprite.Sprite):
+    def __init__(self, level):
+        super().__init__()
+        self.boss_level = level // 5  # 1 for level 5, 2 for level 10, etc.
+        
+        # Special handling for level 50 boss
+        self.is_omega_boss = level == 50
+        
+        # Size scales with level, but Omega Boss is massive
+        self.size = 400 if self.is_omega_boss else 180 + (self.boss_level * 20)
+        self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        
+        if self.is_omega_boss:  # Level 50 - "THE OMEGA BOSS"
+            # Create a massive, intimidating boss
+            # Main core - pulsing dark matter core
+            core_color = (100, 0, 150)  # Dark purple
+            pygame.draw.circle(self.image, core_color, (self.size//2, self.size//2), self.size//3)
+            
+            # Multiple rotating rings
+            for i in range(5):
+                radius = self.size//3 + i * 30
+                color = (255, i * 50, 255 - i * 30)  # Color gradient
+                pygame.draw.circle(self.image, color, (self.size//2, self.size//2), radius, 4)
+            
+            # Energy crystals at cardinal points
+            crystal_positions = [(self.size//2, 0), (self.size, self.size//2),
+                               (self.size//2, self.size), (0, self.size//2)]
+            for pos in crystal_positions:
+                crystal_color = (255, 0, 100)  # Bright pink
+                points = []
+                for j in range(3):  # Triangle crystals
+                    angle = 2 * math.pi * j / 3
+                    points.append((
+                        pos[0] + math.cos(angle) * 40,
+                        pos[1] + math.sin(angle) * 40
+                    ))
+                pygame.draw.polygon(self.image, crystal_color, points)
+            
+            # Add glowing eyes
+            eye_color = (255, 0, 0)  # Bright red
+            eye_size = 30
+            pygame.draw.circle(self.image, eye_color, (self.size//3, self.size//3), eye_size)
+            pygame.draw.circle(self.image, eye_color, (2*self.size//3, self.size//3), eye_size)
+            
+            # Add energy beams
+            beam_color = (255, 255, 0)  # Yellow
+            for i in range(8):
+                angle = 2 * math.pi * i / 8
+                start = (self.size//2, self.size//2)
+                end = (
+                    self.size//2 + math.cos(angle) * self.size//2,
+                    self.size//2 + math.sin(angle) * self.size//2
+                )
+                pygame.draw.line(self.image, beam_color, start, end, 6)
+        
+        elif self.boss_level == 1:  # Level 5 boss - "The Crimson Titan"
+            # Draw large red pentagon with glowing core
+            points = []
+            for i in range(5):
+                angle = 2 * math.pi * i / 5 - math.pi / 2
+                points.append((
+                    self.size/2 + math.cos(angle) * self.size/2,
+                    self.size/2 + math.sin(angle) * self.size/2
+                ))
+            pygame.draw.polygon(self.image, RED, points)
+            # Draw core
+            pygame.draw.circle(self.image, ORANGE, (self.size//2, self.size//2), self.size//4)
+            
+        elif self.boss_level == 2:  # Level 10 boss - "The Void Reaper"
+            # Draw dark purple crystal-like shape
+            points = []
+            for i in range(8):
+                angle = 2 * math.pi * i / 8
+                r = self.size/2 if i % 2 == 0 else self.size/3
+                points.append((
+                    self.size/2 + math.cos(angle) * r,
+                    self.size/2 + math.sin(angle) * r
+                ))
+            pygame.draw.polygon(self.image, PURPLE, points)
+            # Add glowing eyes
+            eye_color = (255, 0, 255)  # Bright purple
+            pygame.draw.circle(self.image, eye_color, (self.size//3, self.size//3), 15)
+            pygame.draw.circle(self.image, eye_color, (2*self.size//3, self.size//3), 15)
+            
+        elif self.boss_level == 3:  # Level 15 boss - "The Omega Destroyer"
+            # Draw massive technological horror
+            # Main body
+            pygame.draw.rect(self.image, RED, (self.size//4, self.size//4, self.size//2, self.size//2))
+            # Outer ring
+            pygame.draw.circle(self.image, ORANGE, (self.size//2, self.size//2), self.size//2, 5)
+            # Energy nodes
+            for i in range(4):
+                angle = 2 * math.pi * i / 4
+                x = self.size//2 + math.cos(angle) * self.size//3
+                y = self.size//2 + math.sin(angle) * self.size//3
+                pygame.draw.circle(self.image, YELLOW, (int(x), int(y)), 20)
+                
+        elif self.boss_level == 4:  # Level 20 boss - "The Quantum Harbinger"
+            # Draw quantum-themed boss with multiple layers
+            # Outer quantum field
+            pygame.draw.circle(self.image, (0, 255, 255), (self.size//2, self.size//2), self.size//2)
+            # Inner rings
+            for i in range(3):
+                radius = self.size//2 - (i * 20)
+                pygame.draw.circle(self.image, (0, 150, 255), (self.size//2, self.size//2), radius, 3)
+            # Energy beams
+            for i in range(6):
+                angle = 2 * math.pi * i / 6
+                start = (self.size//2, self.size//2)
+                end = (
+                    self.size//2 + math.cos(angle) * self.size//2,
+                    self.size//2 + math.sin(angle) * self.size//2
+                )
+                pygame.draw.line(self.image, (0, 255, 255), start, end, 4)
+                
+        else:  # Level 25+ boss - "The Cosmic Overlord"
+            # Draw an even more intimidating boss
+            # Main core
+            pygame.draw.circle(self.image, (255, 0, 0), (self.size//2, self.size//2), self.size//2)
+            # Pulsing rings
+            for i in range(4):
+                radius = self.size//2 - (i * 15)
+                pygame.draw.circle(self.image, (255, i * 60, 0), (self.size//2, self.size//2), radius, 5)
+            # Energy crystals
+            for i in range(8):
+                angle = 2 * math.pi * i / 8
+                distance = self.size//3
+                x = self.size//2 + math.cos(angle) * distance
+                y = self.size//2 + math.sin(angle) * distance
+                # Draw diamond-shaped crystals
+                points = []
+                for j in range(4):
+                    crystal_angle = 2 * math.pi * j / 4 + angle
+                    points.append((
+                        x + math.cos(crystal_angle) * 15,
+                        y + math.sin(crystal_angle) * 15
+                    ))
+                pygame.draw.polygon(self.image, (255, 255, 0), points)
+        
+        self.rect = self.image.get_rect()
+        self.rect.centerx = WIDTH // 2
+        self.rect.top = -self.size
+        
+        # Boss attributes scaled by level
+        self.max_health = 800 * self.boss_level  # Reduced base health for more frequent bosses
+        self.health = self.max_health
+        self.speed = 2 + self.boss_level
+        self.shoot_delay = max(100, 400 - (self.boss_level * 40))  # Faster shooting at higher levels
+        self.last_shot = pygame.time.get_ticks()
+        self.pattern_time = pygame.time.get_ticks()
+        self.pattern_duration = 3000  # Switch patterns every 3 seconds
+        self.current_pattern = 0
+        self.movement_offset = 0
+        
+    def update(self):
+        now = pygame.time.get_ticks()
+        
+        # Move into screen at start
+        if self.rect.top < 50:
+            self.rect.y += 2
+            return
+        
+        # Special patterns for Omega Boss
+        if self.is_omega_boss:
+            # Switch patterns more frequently
+            if now - self.pattern_time > 2000:  # Every 2 seconds
+                self.pattern_time = now
+                self.current_pattern = (self.current_pattern + 1) % 4
+                self.movement_offset = 0
+            
+            # More complex movement patterns
+            if self.current_pattern == 0:  # Double sine wave
+                self.movement_offset += 0.08
+                self.rect.centerx = WIDTH//2 + math.sin(self.movement_offset) * (WIDTH//3)
+                self.rect.centery = HEIGHT//4 + math.sin(2 * self.movement_offset) * (HEIGHT//6)
+            elif self.current_pattern == 1:  # Infinity pattern
+                self.movement_offset += 0.05
+                scale_x = WIDTH//3
+                scale_y = HEIGHT//6
+                self.rect.centerx = WIDTH//2 + math.sin(2 * self.movement_offset) * scale_x
+                self.rect.centery = HEIGHT//4 + math.sin(self.movement_offset) * scale_y
+            elif self.current_pattern == 2:  # Diamond pattern
+                self.movement_offset += 0.04
+                angle = self.movement_offset % (2 * math.pi)
+                radius = 200
+                self.rect.centerx = WIDTH//2 + math.cos(angle) * radius
+                self.rect.centery = HEIGHT//4 + math.sin(angle) * radius
+            else:  # Aggressive teleport
+                if random.random() < 0.05:  # 5% chance to teleport each frame
+                    self.rect.centerx = random.randint(self.size//2, WIDTH - self.size//2)
+                    self.rect.centery = random.randint(50, HEIGHT//3)
+        else:
+            # Regular boss patterns
+            # Switch patterns periodically
+            if now - self.pattern_time > self.pattern_duration:
+                self.pattern_time = now
+                self.current_pattern = (self.current_pattern + 1) % 3
+                self.movement_offset = 0
+            
+            # Movement patterns
+            if self.current_pattern == 0:  # Sine wave
+                self.movement_offset += 0.05
+                self.rect.centerx = WIDTH//2 + math.sin(self.movement_offset) * (WIDTH//3)
+            elif self.current_pattern == 1:  # Figure 8
+                self.movement_offset += 0.03
+                scale = 100
+                self.rect.centerx = WIDTH//2 + math.sin(2 * self.movement_offset) * scale
+                self.rect.centery = 150 + math.sin(self.movement_offset) * scale
+            else:  # Random teleports
+                if random.random() < 0.02:  # 2% chance to teleport each frame
+                    self.rect.centerx = random.randint(self.size//2, WIDTH - self.size//2)
+                    self.rect.centery = random.randint(50, HEIGHT//3)
+        
+        # Keep boss on screen
+        if self.rect.left < 0:
+            self.rect.left = 0
+        if self.rect.right > WIDTH:
+            self.rect.right = WIDTH
+        if self.rect.top < 0:
+            self.rect.top = 0
+        if self.rect.bottom > HEIGHT//2:
+            self.rect.bottom = HEIGHT//2
+    
+    def shoot(self):
+        now = pygame.time.get_ticks()
+        if now - self.last_shot > self.shoot_delay:
+            self.last_shot = now
+            bullets = []
+            
+            if self.is_omega_boss:
+                # Multiple attack patterns
+                pattern = (now // 2000) % 4  # Change pattern every 2 seconds
+                
+                if pattern == 0:  # Spiral barrage
+                    for i in range(16):
+                        angle = 2 * math.pi * i / 16 + self.movement_offset
+                        speed = 7
+                        speed_x = math.cos(angle) * speed
+                        speed_y = math.sin(angle) * speed
+                        bullet = BossBullet(self.rect.centerx, self.rect.centery, 
+                                          speed_x, speed_y, (255, 0, 0))
+                        bullets.append(bullet)
+                
+                elif pattern == 1:  # Cross beam
+                    speeds = [(8, 0), (-8, 0), (0, 8), (0, -8),
+                             (5.6, 5.6), (-5.6, 5.6), (5.6, -5.6), (-5.6, -5.6)]
+                    for speed_x, speed_y in speeds:
+                        bullet = BossBullet(self.rect.centerx, self.rect.centery,
+                                          speed_x, speed_y, (255, 255, 0))
+                        bullets.append(bullet)
+                
+                elif pattern == 2:  # Homing missiles
+                    for _ in range(4):
+                        # Target player's position
+                        from game import player  # Get player reference
+                        dx = player.rect.centerx - self.rect.centerx
+                        dy = player.rect.centery - self.rect.centery
+                        dist = math.sqrt(dx * dx + dy * dy)
+                        speed = 6
+                        speed_x = dx / dist * speed
+                        speed_y = dy / dist * speed
+                        bullet = BossBullet(self.rect.centerx, self.rect.centery,
+                                          speed_x, speed_y, (0, 255, 255))
+                        bullets.append(bullet)
+                
+                else:  # Random scatter shot
+                    for _ in range(20):
+                        angle = random.uniform(0, 2 * math.pi)
+                        speed = random.uniform(4, 10)
+                        speed_x = math.cos(angle) * speed
+                        speed_y = math.sin(angle) * speed
+                        bullet = BossBullet(self.rect.centerx, self.rect.centery,
+                                          speed_x, speed_y, (255, 0, 255))
+                        bullets.append(bullet)
+            else:
+                # Regular boss patterns
+                if self.boss_level == 1:  # Pentagram shot pattern
+                    for i in range(5):
+                        angle = 2 * math.pi * i / 5 + self.movement_offset
+                        speed_x = math.cos(angle) * 5
+                        speed_y = math.sin(angle) * 5
+                        bullet = BossBullet(self.rect.centerx, self.rect.centery, speed_x, speed_y, RED)
+                        bullets.append(bullet)
+                
+                elif self.boss_level == 2:  # Spiral pattern
+                    for i in range(8):
+                        angle = 2 * math.pi * i / 8 + self.movement_offset
+                        speed_x = math.cos(angle) * 6
+                        speed_y = math.sin(angle) * 6
+                        bullet = BossBullet(self.rect.centerx, self.rect.centery, speed_x, speed_y, PURPLE)
+                        bullets.append(bullet)
+                
+                else:  # Chaos pattern
+                    for _ in range(12):
+                        angle = random.uniform(0, 2 * math.pi)
+                        speed = random.uniform(3, 8)
+                        speed_x = math.cos(angle) * speed
+                        speed_y = math.sin(angle) * speed
+                        bullet = BossBullet(self.rect.centerx, self.rect.centery, speed_x, speed_y, ORANGE)
+                        bullets.append(bullet)
+            
+            return bullets
+        return []
+
+# Boss Bullet class
+class BossBullet(pygame.sprite.Sprite):
+    def __init__(self, x, y, speed_x, speed_y, color):
+        super().__init__()
+        self.image = pygame.Surface((10, 10), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, color, (5, 5), 5)
+        self.rect = self.image.get_rect()
+        self.rect.centerx = x
+        self.rect.centery = y
+        self.speed_x = speed_x
+        self.speed_y = speed_y
+        
+    def update(self):
+        self.rect.x += self.speed_x
+        self.rect.y += self.speed_y
+        # Kill if off screen
+        if (self.rect.left < -100 or self.rect.right > WIDTH + 100 or
+            self.rect.top < -100 or self.rect.bottom > HEIGHT + 100):
+            self.kill()
 
 # Function to get player name
 def get_player_name():
@@ -774,6 +1161,9 @@ def game():
     asteroid_count = 6
     enemy_count = 2
     
+    # Track if we just completed a boss level
+    just_defeated_boss = False
+    
     # Power-up settings
     power_up_chance = 0.25  # 25% chance per destroyed object
     last_power_up_time = pygame.time.get_ticks()
@@ -807,6 +1197,10 @@ def game():
     level_transition = False
     transition_start_time = 0
     transition_duration = 1000  # 1 second
+    
+    # Add boss sprite group
+    boss_group = pygame.sprite.Group()
+    boss_bullets = pygame.sprite.Group()
     
     while running:
         # Keep loop running at the right speed
@@ -848,8 +1242,11 @@ def game():
             asteroid_count = 6 + level  # Scale with level
             enemy_count = 2 + level // 2  # Add enemy every 2 levels
             
-            # Make level progression more consistent by using a fixed increment
-            level_score_threshold += level_score_threshold_delta
+            # Update score threshold for next level
+            level_score_threshold = score + level_score_threshold_delta
+            
+            # Reset boss defeat flag when moving to a new level
+            just_defeated_boss = False
         
         # Handle level transition
         if level_transition:
@@ -857,16 +1254,104 @@ def game():
             if current_time - transition_start_time > transition_duration:
                 level_transition = False
                 
-                # Create new asteroids and enemies for the new level
-                for i in range(asteroid_count):
-                    a = Asteroid(level)
-                    all_sprites.add(a)
-                    asteroids.add(a)
+                # Only spawn regular enemies if it's not a boss level
+                if level % 5 != 0:
+                    # Create new asteroids and enemies for the new level
+                    for i in range(asteroid_count):
+                        a = Asteroid(level)
+                        all_sprites.add(a)
+                        asteroids.add(a)
+                    
+                    for i in range(enemy_count):
+                        e = EnemyShip(level)
+                        all_sprites.add(e)
+                        enemy_ships.add(e)
+        
+        # Check if it's a boss level (every 5 levels)
+        if level % 5 == 0 and not boss_group and not level_transition and not just_defeated_boss:
+            # Clear all enemies and asteroids
+            for sprite in [asteroids, enemy_ships, power_ups, bombs]:
+                for obj in sprite:
+                    obj.kill()
+            # Spawn boss
+            boss = Boss(level)
+            all_sprites.add(boss)
+            boss_group.add(boss)
+            
+            # Special effects for Omega Boss entrance
+            if level == 50:
+                # Create multiple explosion effects
+                for _ in range(5):
+                    x = random.randint(0, WIDTH)
+                    y = random.randint(0, HEIGHT//2)
+                    explosion = Explosion(x, y)
+                    explosion.radius = 200
+                    explosion.growth_rate = 30
+                    all_sprites.add(explosion)
+                    explosions.add(explosion)
+                sound_manager.play_explosion()
+                pygame.time.wait(100)
+                sound_manager.play_explosion()
+            else:
+                sound_manager.play_explosion()  # Normal entrance sound
+            
+            # Modify boss attributes for level 50
+            if level == 50:
+                boss.max_health = 5000  # Much more health
+                boss.health = boss.max_health
+                boss.shoot_delay = 300  # Faster shooting
+                boss.pattern_duration = 2000  # Faster pattern changes
+        
+        # Update boss and handle boss bullets
+        if boss_group:
+            # Boss shooting
+            for boss in boss_group:
+                new_bullets = boss.shoot()
+                for bullet in new_bullets:
+                    all_sprites.add(bullet)
+                    boss_bullets.add(bullet)
+            
+            # Check for player bullet hits on boss
+            hits = pygame.sprite.groupcollide(boss_group, player_bullets, False, True)
+            for boss, bullets in hits.items():
+                boss.health -= 10 * len(bullets)
+                sound_manager.play_collision()  # Hit sound
                 
-                for i in range(enemy_count):
-                    e = EnemyShip(level)
-                    all_sprites.add(e)
-                    enemy_ships.add(e)
+                # Create small explosion effect for each hit
+                for bullet in bullets:
+                    explosion = Explosion(bullet.rect.centerx, bullet.rect.centery)
+                    explosion.radius = 30  # Smaller explosion for hits
+                    explosion.growth_rate = 5
+                    explosion.max_frames = 5
+                    all_sprites.add(explosion)
+                
+                # Check if boss is defeated
+                if boss.health <= 0:
+                    boss.kill()
+                    # Create massive explosion
+                    explosion = Explosion(boss.rect.centerx, boss.rect.centery)
+                    explosion.radius = 400  # Massive explosion
+                    explosion.growth_rate = 40
+                    all_sprites.add(explosion)
+                    explosions.add(explosion)
+                    sound_manager.play_explosion()
+                    boss_bonus = 5000 * (level // 5)  # Big score bonus for defeating boss
+                    score += boss_bonus
+                    # Set next level threshold right after boss bonus
+                    level_score_threshold = score + level_score_threshold_delta
+                    # Set flag to prevent immediate boss respawn
+                    just_defeated_boss = True
+                    
+                    # Spawn regular enemies for the next level
+                    for i in range(asteroid_count):
+                        a = Asteroid(level)
+                        all_sprites.add(a)
+                        asteroids.add(a)
+                    
+                    for i in range(enemy_count):
+                        e = EnemyShip(level)
+                        all_sprites.add(e)
+                        enemy_ships.add(e)
         
         # Update sprites if not in level transition
         if not level_transition:
@@ -1074,8 +1559,6 @@ def game():
                     power_up_text.append("RAPID FIRE")
                 if PowerUp.DOUBLE_SHOT in player.power_ups:
                     power_up_text.append("DOUBLE SHOT")
-                if PowerUp.STRAY_BOMB in player.power_ups:
-                    power_up_text.append("STRAY BOMB")
                 if power_up_text:
                     power_up_display = font.render(" + ".join(power_up_text), True, YELLOW)
                     screen.blit(power_up_display, (10, 90))
@@ -1085,6 +1568,33 @@ def game():
                 if remaining > 0:
                     timer_text = font.render(f"({remaining}s)", True, YELLOW)
                     screen.blit(timer_text, (10, 120))
+        
+        # Draw boss health bar if boss exists
+        if boss_group:
+            boss = boss_group.sprites()[0]
+            bar_width = WIDTH - 100
+            bar_height = 20
+            health_percent = boss.health / boss.max_health
+            
+            if level == 50:  # Special health bar for Omega Boss
+                # Draw multiple health bars with different colors
+                colors = [(255, 0, 0), (255, 0, 255), (0, 255, 255)]  # Red, Purple, Cyan
+                for i, color in enumerate(colors):
+                    y_offset = i * 15
+                    pygame.draw.rect(screen, color, (50, 20 + y_offset, bar_width, 5))
+                    pygame.draw.rect(screen, (255, 255, 255), 
+                                   (50, 20 + y_offset, bar_width * health_percent, 5))
+                
+                # Draw boss name with special effects
+                boss_name = "THE OMEGA BOSS - DESTROYER OF WORLDS"
+                boss_text = font.render(boss_name, True, (255, 0, 0))
+                shadow_text = font.render(boss_name, True, (255, 255, 0))
+                screen.blit(shadow_text, (WIDTH//2 - boss_text.get_width()//2 + 2, 47))
+                screen.blit(boss_text, (WIDTH//2 - boss_text.get_width()//2, 45))
+            else:
+                # Regular boss health bar
+                pygame.draw.rect(screen, RED, (50, 20, bar_width, bar_height))
+                pygame.draw.rect(screen, GREEN, (50, 20, bar_width * health_percent, bar_height))
         
         # Flip the display
         pygame.display.flip()
