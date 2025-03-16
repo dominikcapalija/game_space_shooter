@@ -33,8 +33,8 @@ print("Pygame version:", pygame.version.ver)
 print("Mixer initialized:", pygame.mixer.get_init())
 print("Number of channels:", pygame.mixer.get_num_channels())
 
-def create_simple_sound(frequency, duration, volume=0.5):
-    """Create a simple sound wave"""
+def create_simple_sound(frequency, duration, volume=0.5, sound_type='sine'):
+    """Create a more interesting sound wave"""
     sample_rate = 44100
     num_samples = int(sample_rate * duration)
     sound_buffer = numpy.zeros((num_samples, 2), dtype=numpy.int16)
@@ -42,8 +42,39 @@ def create_simple_sound(frequency, duration, volume=0.5):
     
     for i in range(num_samples):
         t = float(i) / sample_rate
-        # Simple sine wave
-        sample = int(max_sample * volume * math.sin(2.0 * math.pi * frequency * t))
+        
+        if sound_type == 'laser':
+            # Laser sound: frequency sweep from high to low with decay
+            freq = frequency * (1.0 - t/duration * 0.5)  # Sweep down
+            decay = 1.0 - t/duration
+            sample = int(max_sample * volume * decay * math.sin(2.0 * math.pi * freq * t))
+        
+        elif sound_type == 'explosion':
+            # Explosion: noise with low frequency rumble and fast decay
+            noise = random.uniform(-1, 1)
+            rumble = math.sin(2.0 * math.pi * 30 * t)  # 30 Hz rumble
+            decay = math.exp(-10 * t/duration)
+            sample = int(max_sample * volume * decay * (0.7 * noise + 0.3 * rumble))
+        
+        elif sound_type == 'collision':
+            # Collision: mix of frequencies with quick decay
+            f1 = frequency
+            f2 = frequency * 1.5
+            decay = math.exp(-20 * t/duration)
+            sample = int(max_sample * volume * decay * (
+                0.6 * math.sin(2.0 * math.pi * f1 * t) +
+                0.4 * math.sin(2.0 * math.pi * f2 * t)
+            ))
+        
+        elif sound_type == 'powerup':
+            # Power-up: ascending frequency with wobble
+            freq = frequency * (1.0 + t/duration)  # Sweep up
+            wobble = 1.0 + 0.2 * math.sin(2.0 * math.pi * 10 * t)  # Add wobble
+            sample = int(max_sample * volume * math.sin(2.0 * math.pi * freq * t * wobble))
+        
+        else:  # Default sine wave
+            sample = int(max_sample * volume * math.sin(2.0 * math.pi * frequency * t))
+        
         sound_buffer[i] = [sample, sample]  # Same value for both channels
     
     return pygame.sndarray.make_sound(sound_buffer)
@@ -56,11 +87,11 @@ class SoundManager:
         if cls._instance is None:
             cls._instance = super(SoundManager, cls).__new__(cls)
             try:
-                # Create sound effects directly in memory
-                cls._instance.laser_sound = create_simple_sound(1000, 0.1, 0.3)  # High pitch, short
-                cls._instance.explosion_sound = create_simple_sound(200, 0.3, 0.5)  # Low pitch, longer
-                cls._instance.collision_sound = create_simple_sound(500, 0.1, 0.4)  # Medium pitch
-                cls._instance.powerup_sound = create_simple_sound(800, 0.2, 0.4)  # Higher pitch
+                # Create sound effects directly in memory with improved sounds
+                cls._instance.laser_sound = create_simple_sound(2000, 0.15, 0.3, 'laser')  # Higher pitch, longer
+                cls._instance.explosion_sound = create_simple_sound(100, 0.4, 0.5, 'explosion')  # Lower, longer
+                cls._instance.collision_sound = create_simple_sound(400, 0.15, 0.4, 'collision')  # Complex sound
+                cls._instance.powerup_sound = create_simple_sound(600, 0.25, 0.4, 'powerup')  # Ascending with wobble
                 
                 cls._instance.enabled = True
                 print("Sound manager initialized successfully")
