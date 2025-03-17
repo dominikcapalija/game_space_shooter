@@ -371,7 +371,7 @@ class Ship(pygame.sprite.Sprite):
         self.image = image
         self.rect = self.image.get_rect()
         self.rect.centerx = WIDTH // 2
-        self.rect.bottom = HEIGHT - 10
+        self.rect.bottom = HEIGHT - 100  # Start higher to allow vertical movement
         self.base_speed = speed  # Store base speed
         self.speed = speed
         self.base_shoot_delay = 250  # milliseconds
@@ -386,22 +386,38 @@ class Ship(pygame.sprite.Sprite):
         self.power_up_start = 0
         self.power_up_duration = 50000  # 50 seconds
         
-        # Bomb attributes
-        self.has_bomb = False
-
+        # Movement boundaries
+        self.min_y = 50  # Leave some space at top
+        self.max_y = HEIGHT - 50  # Leave some space at bottom
+    
     def update(self):
         keys = pygame.key.get_pressed()
         movement_speed = self.speed * 2 if PowerUp.RAPID_MOVEMENT in self.power_ups else self.speed
+        
+        # Horizontal movement
         if keys[pygame.K_LEFT]:
             self.rect.x -= movement_speed
         if keys[pygame.K_RIGHT]:
             self.rect.x += movement_speed
+            
+        # Vertical movement
+        if keys[pygame.K_UP]:
+            self.rect.y -= movement_speed
+        if keys[pygame.K_DOWN]:
+            self.rect.y += movement_speed
         
         # Keep ship on screen
+        # Horizontal boundaries
         if self.rect.left < 0:
             self.rect.left = 0
         if self.rect.right > WIDTH:
             self.rect.right = WIDTH
+            
+        # Vertical boundaries
+        if self.rect.top < self.min_y:
+            self.rect.top = self.min_y
+        if self.rect.bottom > self.max_y:
+            self.rect.bottom = self.max_y
             
         # Check power-up duration
         now = pygame.time.get_ticks()
