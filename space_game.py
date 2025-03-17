@@ -305,23 +305,54 @@ class StrayBomb(pygame.sprite.Sprite):
 class PowerUp(pygame.sprite.Sprite):
     RAPID_FIRE = "rapid_fire"
     DOUBLE_SHOT = "double_shot"
+    TRIPLE_SHOT = "triple_shot"  # New power-up
+    SUPER_RAPID_FIRE = "super_rapid_fire"  # New power-up
+    RAPID_MOVEMENT = "rapid_movement"  # New power-up
     
     def __init__(self, x, y):
         super().__init__()
-        self.type = random.choice([PowerUp.RAPID_FIRE, PowerUp.DOUBLE_SHOT])
+        # Increase double shot frequency by adding it multiple times to the choice list
+        self.type = random.choice([
+            PowerUp.RAPID_FIRE,
+            PowerUp.DOUBLE_SHOT,
+            PowerUp.DOUBLE_SHOT,  # Added twice for higher frequency
+            PowerUp.DOUBLE_SHOT,  # Added thrice for higher frequency
+            PowerUp.TRIPLE_SHOT,
+            PowerUp.SUPER_RAPID_FIRE,
+            PowerUp.RAPID_MOVEMENT
+        ])
         self.size = 20
         self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
         
+        # Create power-up icon
         if self.type == PowerUp.RAPID_FIRE:
             color = YELLOW
             # Draw lightning bolt
             points = [(10, 0), (20, 8), (13, 12), (20, 20), (0, 12), (7, 8)]
             pygame.draw.polygon(self.image, color, points)
-        else:  # DOUBLE_SHOT
+        elif self.type == PowerUp.DOUBLE_SHOT:
             color = PURPLE
             # Draw double circle
             pygame.draw.circle(self.image, color, (5, 10), 5)
             pygame.draw.circle(self.image, color, (15, 10), 5)
+        elif self.type == PowerUp.TRIPLE_SHOT:
+            color = RED
+            # Draw triple circle
+            pygame.draw.circle(self.image, color, (4, 10), 4)
+            pygame.draw.circle(self.image, color, (10, 5), 4)
+            pygame.draw.circle(self.image, color, (16, 10), 4)
+        elif self.type == PowerUp.SUPER_RAPID_FIRE:
+            color = (255, 128, 0)  # Bright orange
+            # Draw double lightning bolt
+            points1 = [(5, 0), (10, 8), (7, 12), (10, 20), (0, 12), (3, 8)]
+            points2 = [(15, 0), (20, 8), (17, 12), (20, 20), (10, 12), (13, 8)]
+            pygame.draw.polygon(self.image, color, points1)
+            pygame.draw.polygon(self.image, color, points2)
+        else:  # RAPID_MOVEMENT
+            color = (0, 255, 255)  # Cyan
+            # Draw speed arrows
+            pygame.draw.polygon(self.image, color, [(0, 10), (8, 5), (8, 15)])  # Left arrow
+            pygame.draw.polygon(self.image, color, [(12, 10), (20, 5), (20, 15)])  # Right arrow
         
         self.rect = self.image.get_rect()
         self.rect.x = x
@@ -341,6 +372,7 @@ class Ship(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.centerx = WIDTH // 2
         self.rect.bottom = HEIGHT - 10
+        self.base_speed = speed  # Store base speed
         self.speed = speed
         self.base_shoot_delay = 250  # milliseconds
         self.shoot_delay = self.base_shoot_delay
@@ -359,10 +391,11 @@ class Ship(pygame.sprite.Sprite):
 
     def update(self):
         keys = pygame.key.get_pressed()
+        movement_speed = self.speed * 2 if PowerUp.RAPID_MOVEMENT in self.power_ups else self.speed
         if keys[pygame.K_LEFT]:
-            self.rect.x -= self.speed
+            self.rect.x -= movement_speed
         if keys[pygame.K_RIGHT]:
-            self.rect.x += self.speed
+            self.rect.x += movement_speed
         
         # Keep ship on screen
         if self.rect.left < 0:
@@ -375,29 +408,66 @@ class Ship(pygame.sprite.Sprite):
         if self.power_ups and now - self.power_up_start > self.power_up_duration:
             self.power_ups.clear()
             self.shoot_delay = self.base_shoot_delay
-    
-    def shoot(self):
-        now = pygame.time.get_ticks()
-        if now - self.last_shot > self.shoot_delay:
-            self.last_shot = now
-            sound_manager.play_laser()  # Play laser sound
-            if PowerUp.DOUBLE_SHOT in self.power_ups:
-                # Return list of two bullets side by side
-                return [
-                    Bullet(self.rect.left + 10, self.rect.top, -1),
-                    Bullet(self.rect.right - 10, self.rect.top, -1)
-                ]
-            else:
-                # Return single bullet as a list for consistency
-                return [Bullet(self.rect.centerx, self.rect.top, -1)]
-        return []
+            self.speed = self.base_speed
     
     def add_power_up(self, power_up_type):
         self.power_ups.add(power_up_type)
         self.power_up_start = pygame.time.get_ticks()
         
+        # Handle shooting power-ups
         if power_up_type == PowerUp.RAPID_FIRE:
             self.shoot_delay = self.base_shoot_delay // 2  # Twice as fast
+        elif power_up_type == PowerUp.SUPER_RAPID_FIRE:
+            self.shoot_delay = self.base_shoot_delay // 4  # Four times as fast
+        elif power_up_type == PowerUp.RAPID_MOVEMENT:
+            self.speed = self.base_speed * 2  # Twice as fast movement
+        
+        # Triple shot and double shot don't need special handling here
+        # as they are handled in the shoot() method
+        
+        # Play power-up sound
+        sound_manager.play_powerup()
+        
+        # Print debug info
+        print(f"Power-up collected: {power_up_type}")
+        print(f"Active power-ups: {self.power_ups}")
+        print(f"Current shoot delay: {self.shoot_delay}")
+        print(f"Current speed: {self.speed}")
+
+    def shoot(self):
+        now = pygame.time.get_ticks()
+        if now - self.last_shot > self.shoot_delay:
+            self.last_shot = now
+            sound_manager.play_laser()  # Play laser sound
+            
+            bullets = []
+            # Count number of double shot power-ups for multiplicative effect
+            double_shot_count = sum(1 for pu in self.power_ups if pu == PowerUp.DOUBLE_SHOT)
+            shot_multiplier = 2 ** double_shot_count  # 1 double shot = 2x, 2 double shots = 4x, etc.
+            
+            if PowerUp.TRIPLE_SHOT in self.power_ups:
+                # Base triple shot pattern
+                base_pattern = [
+                    (self.rect.centerx, self.rect.top, -1, 0),  # Center
+                    (self.rect.centerx - 20, self.rect.top, -1, -15),  # Left
+                    (self.rect.centerx + 20, self.rect.top, -1, 15)   # Right
+                ]
+                # Multiply pattern based on double shot count
+                for _ in range(shot_multiplier):
+                    offset = _ * 10  # Slight offset for each multiplication
+                    for x, y, dir, angle in base_pattern:
+                        bullets.append(Bullet(x + offset, y, dir, angle=angle))
+                        bullets.append(Bullet(x - offset, y, dir, angle=angle))
+            else:
+                # Regular shot with multiplier
+                base_x = self.rect.centerx
+                spacing = 15  # Space between bullet pairs
+                for i in range(shot_multiplier):
+                    offset = (i - (shot_multiplier - 1) / 2) * spacing
+                    bullets.append(Bullet(base_x + offset, self.rect.top, -1))
+            
+            return bullets
+        return []
 
 # Enemy ship class
 class EnemyShip(pygame.sprite.Sprite):
@@ -441,7 +511,7 @@ class EnemyShip(pygame.sprite.Sprite):
 
 # Bullet class
 class Bullet(pygame.sprite.Sprite):
-    def __init__(self, x, y, direction, color=GREEN):
+    def __init__(self, x, y, direction, color=GREEN, angle=0):
         super().__init__()
         self.image = pygame.Surface((5, 10))
         self.image.fill(color)
@@ -450,9 +520,20 @@ class Bullet(pygame.sprite.Sprite):
         self.rect.bottom = y
         self.speed = 10
         self.direction = direction  # 1 for down (enemy), -1 for up (player)
+        
+        # Add angle for spread shots
+        self.angle = math.radians(angle)  # Convert to radians
+        self.speedx = math.sin(self.angle) * self.speed
+        self.speedy = math.cos(self.angle) * self.speed * direction
+        self.x = float(x)  # Store exact position
+        self.y = float(y)
 
     def update(self):
-        self.rect.y += self.speed * self.direction
+        # Update position using floating point coordinates
+        self.x += self.speedx
+        self.y += self.speedy
+        self.rect.x = int(self.x)
+        self.rect.y = int(self.y)
         # Kill if it moves off the screen
         if self.rect.bottom < 0 or self.rect.top > HEIGHT:
             self.kill()
@@ -1635,72 +1716,108 @@ def game():
             # Draw game elements
             all_sprites.draw(screen)
             
-            # Draw score at top left
-            score_text = font.render(f"Score: {score}", True, WHITE)
-            screen.blit(score_text, (10, 10))
+            # Draw boss health bar if boss exists
+            if boss_group:
+                boss = boss_group.sprites()[0]
+                bar_width = WIDTH - 100
+                bar_height = 20
+                health_percent = boss.health / boss.max_health
+                
+                if level == 50:  # Special health bar for Omega Boss
+                    # Draw boss name with special effects
+                    boss_name = "THE OMEGA BOSS - DESTROYER OF WORLDS"
+                    boss_text = font.render(boss_name, True, (255, 0, 0))
+                    shadow_text = font.render(boss_name, True, (255, 255, 0))
+                    screen.blit(shadow_text, (WIDTH//2 - boss_text.get_width()//2 + 2, 2))
+                    screen.blit(boss_text, (WIDTH//2 - boss_text.get_width()//2, 0))
+                    
+                    # Draw multiple health bars with different colors
+                    colors = [(255, 0, 0), (255, 0, 255), (0, 255, 255)]  # Red, Purple, Cyan
+                    for i, color in enumerate(colors):
+                        y_offset = i * 5
+                        pygame.draw.rect(screen, color, (50, 25 + y_offset, bar_width, 3))
+                        pygame.draw.rect(screen, (255, 255, 255), 
+                                       (50, 25 + y_offset, bar_width * health_percent, 3))
+                else:
+                    # Regular boss health bar
+                    pygame.draw.rect(screen, RED, (50, 5, bar_width, bar_height))
+                    pygame.draw.rect(screen, GREEN, (50, 5, bar_width * health_percent, bar_height))
+                
+                # Adjust other UI elements to appear below the boss health bar
+                score_y = 45
+                name_y = 85
+                powerup_y = 125
+            else:
+                # Normal UI positions when no boss
+                score_y = 10
+                name_y = 50
+                powerup_y = 90
             
-            # Draw level name centered at top
+            # Draw score at top left with adjusted position
+            score_text = font.render(f"Score: {score}", True, WHITE)
+            screen.blit(score_text, (10, score_y))
+            
+            # Draw level name centered at top with adjusted position
             current_level_name = LEVEL_NAMES[min(level - 1, len(LEVEL_NAMES) - 1)]
             level_name_text = font.render(current_level_name, True, ORANGE)
-            screen.blit(level_name_text, (WIDTH//2 - level_name_text.get_width()//2, 10))
+            screen.blit(level_name_text, (WIDTH//2 - level_name_text.get_width()//2, score_y))
             
-            # Draw level number at top right
+            # Draw level number at top right with adjusted position
             level_text = font.render(f"Level {level}", True, WHITE)
-            screen.blit(level_text, (WIDTH - level_text.get_width() - 10, 10))
+            screen.blit(level_text, (WIDTH - level_text.get_width() - 10, score_y))
             
-            # Draw player name and invincible status if active
+            # Draw player name and invincible status with adjusted position
             name_color = YELLOW if player.is_invincible else WHITE
             name_text = font.render(f"Player: {player_name}", True, name_color)
-            screen.blit(name_text, (10, 50))
+            screen.blit(name_text, (10, name_y))
             
-            # Draw progress to next level
+            # Draw progress to next level with adjusted position
             next_level_score = level_score_threshold
             progress_text = font.render(f"Next level: {score}/{next_level_score}", True, WHITE)
-            screen.blit(progress_text, (WIDTH - progress_text.get_width() - 10, 50))
+            screen.blit(progress_text, (WIDTH - progress_text.get_width() - 10, name_y))
             
-            # Draw active power-ups
+            # Draw active power-ups with icons
             if player.power_ups:
-                power_up_text = []
-                if PowerUp.RAPID_FIRE in player.power_ups:
-                    power_up_text.append("RAPID FIRE")
-                if PowerUp.DOUBLE_SHOT in player.power_ups:
-                    power_up_text.append("DOUBLE SHOT")
-                if power_up_text:
-                    power_up_display = font.render(" + ".join(power_up_text), True, YELLOW)
-                    screen.blit(power_up_display, (10, 90))
+                icon_size = 30
+                icon_spacing = 35
+                icon_y = powerup_y
+                icons_per_row = 8
+                
+                # Create and draw power-up icons
+                for i, power_up_type in enumerate(player.power_ups):
+                    row = i // icons_per_row
+                    col = i % icons_per_row
+                    icon_x = 10 + col * icon_spacing
+                    current_y = icon_y + row * icon_spacing
                     
+                    icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+                    
+                    if power_up_type == PowerUp.RAPID_FIRE:
+                        points = [(15, 0), (30, 12), (20, 18), (30, 30), (0, 18), (10, 12)]
+                        pygame.draw.polygon(icon, YELLOW, points)
+                    elif power_up_type == PowerUp.DOUBLE_SHOT:
+                        pygame.draw.circle(icon, PURPLE, (8, 15), 7)
+                        pygame.draw.circle(icon, PURPLE, (22, 15), 7)
+                    elif power_up_type == PowerUp.TRIPLE_SHOT:
+                        pygame.draw.circle(icon, RED, (6, 15), 6)
+                        pygame.draw.circle(icon, RED, (15, 8), 6)
+                        pygame.draw.circle(icon, RED, (24, 15), 6)
+                    elif power_up_type == PowerUp.SUPER_RAPID_FIRE:
+                        points1 = [(8, 0), (15, 12), (10, 18), (15, 30), (0, 18), (5, 12)]
+                        points2 = [(23, 0), (30, 12), (25, 18), (30, 30), (15, 18), (20, 12)]
+                        pygame.draw.polygon(icon, (255, 128, 0), points1)
+                        pygame.draw.polygon(icon, (255, 128, 0), points2)
+                    elif power_up_type == PowerUp.RAPID_MOVEMENT:
+                        pygame.draw.polygon(icon, (0, 255, 255), [(0, 15), (12, 8), (12, 22)])
+                        pygame.draw.polygon(icon, (0, 255, 255), [(18, 15), (30, 8), (30, 22)])
+                    
+                    screen.blit(icon, (icon_x, current_y))
+                
                 # Draw power-up timer
                 remaining = (player.power_up_duration - (pygame.time.get_ticks() - player.power_up_start)) // 1000
                 if remaining > 0:
-                    timer_text = font.render(f"({remaining}s)", True, YELLOW)
-                    screen.blit(timer_text, (10, 120))
-        
-        # Draw boss health bar if boss exists
-        if boss_group:
-            boss = boss_group.sprites()[0]
-            bar_width = WIDTH - 100
-            bar_height = 20
-            health_percent = boss.health / boss.max_health
-            
-            if level == 50:  # Special health bar for Omega Boss
-                # Draw multiple health bars with different colors
-                colors = [(255, 0, 0), (255, 0, 255), (0, 255, 255)]  # Red, Purple, Cyan
-                for i, color in enumerate(colors):
-                    y_offset = i * 15
-                    pygame.draw.rect(screen, color, (50, 20 + y_offset, bar_width, 5))
-                    pygame.draw.rect(screen, (255, 255, 255), 
-                                   (50, 20 + y_offset, bar_width * health_percent, 5))
-                
-                # Draw boss name with special effects
-                boss_name = "THE OMEGA BOSS - DESTROYER OF WORLDS"
-                boss_text = font.render(boss_name, True, (255, 0, 0))
-                shadow_text = font.render(boss_name, True, (255, 255, 0))
-                screen.blit(shadow_text, (WIDTH//2 - boss_text.get_width()//2 + 2, 47))
-                screen.blit(boss_text, (WIDTH//2 - boss_text.get_width()//2, 45))
-            else:
-                # Regular boss health bar
-                pygame.draw.rect(screen, RED, (50, 20, bar_width, bar_height))
-                pygame.draw.rect(screen, GREEN, (50, 20, bar_width * health_percent, bar_height))
+                    timer_text = font.render(f"{remaining}s", True, YELLOW)
+                    screen.blit(timer_text, (10, icon_y + 35))
         
         # Flip the display
         pygame.display.flip()
