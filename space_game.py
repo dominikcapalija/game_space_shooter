@@ -1412,6 +1412,15 @@ def game():
                     explosion.growth_rate = 5
                     explosion.max_frames = 5
                     all_sprites.add(explosion)
+                    
+                    # Chance to spawn power-up from boss hits
+                    now = pygame.time.get_ticks()
+                    if (random.random() < 0.15 and  # 15% chance per hit
+                        now - last_power_up_time > power_up_min_delay):
+                        power_up = PowerUp(bullet.rect.centerx, bullet.rect.centery)
+                        all_sprites.add(power_up)
+                        power_ups.add(power_up)
+                        last_power_up_time = now
                 
                 # Check if boss is defeated
                 if boss.health <= 0:
@@ -1425,6 +1434,15 @@ def game():
                     sound_manager.play_explosion()
                     boss_bonus = 5000 * (level // 5)  # Big score bonus for defeating boss
                     score += boss_bonus
+                    
+                    # Spawn multiple power-ups when boss is defeated
+                    for _ in range(3):  # Spawn 3 power-ups
+                        x = boss.rect.centerx + random.randint(-100, 100)
+                        y = boss.rect.centery + random.randint(-100, 100)
+                        power_up = PowerUp(x, y)
+                        all_sprites.add(power_up)
+                        power_ups.add(power_up)
+                    
                     # Set next level threshold right after boss bonus
                     level_score_threshold = score + level_score_threshold_delta
                     # Set flag to prevent immediate boss respawn
