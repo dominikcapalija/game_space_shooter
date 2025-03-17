@@ -730,7 +730,7 @@ class Boss(pygame.sprite.Sprite):
         if self.rect.bottom > HEIGHT//2:
             self.rect.bottom = HEIGHT//2
     
-    def shoot(self):
+    def shoot(self, player=None):  # Add player parameter
         now = pygame.time.get_ticks()
         if now - self.last_shot > self.shoot_delay:
             self.last_shot = now
@@ -759,18 +759,19 @@ class Boss(pygame.sprite.Sprite):
                         bullets.append(bullet)
                 
                 elif pattern == 2:  # Homing missiles
-                    for _ in range(4):
-                        # Target player's position
-                        from game import player  # Get player reference
-                        dx = player.rect.centerx - self.rect.centerx
-                        dy = player.rect.centery - self.rect.centery
-                        dist = math.sqrt(dx * dx + dy * dy)
-                        speed = 6
-                        speed_x = dx / dist * speed
-                        speed_y = dy / dist * speed
-                        bullet = BossBullet(self.rect.centerx, self.rect.centery,
-                                          speed_x, speed_y, (0, 255, 255))
-                        bullets.append(bullet)
+                    if player:  # Only create homing missiles if player reference exists
+                        for _ in range(4):
+                            # Target player's position
+                            dx = player.rect.centerx - self.rect.centerx
+                            dy = player.rect.centery - self.rect.centery
+                            dist = math.sqrt(dx * dx + dy * dy)
+                            if dist > 0:  # Prevent division by zero
+                                speed = 6
+                                speed_x = dx / dist * speed
+                                speed_y = dy / dist * speed
+                                bullet = BossBullet(self.rect.centerx, self.rect.centery,
+                                                  speed_x, speed_y, (0, 255, 255))
+                                bullets.append(bullet)
                 
                 else:  # Random scatter shot
                     for _ in range(20):
@@ -1075,6 +1076,85 @@ def welcome_screen():
         
         pygame.display.flip()
 
+def display_rating_screen():
+    font_title = pygame.font.Font(None, 48)
+    font = pygame.font.Font(None, 36)
+    
+    title = font_title.render("Rate Your Experience!", True, YELLOW)
+    instruction = font.render("Press 1-5 to rate the game", True, WHITE)
+    
+    # Draw stars
+    star_surface = pygame.Surface((50, 50), pygame.SRCALPHA)
+    pygame.draw.polygon(star_surface, YELLOW, [
+        (25, 0), (32, 18), (50, 18), (35, 30),
+        (42, 50), (25, 38), (8, 50), (15, 30),
+        (0, 18), (18, 18)
+    ])
+    
+    # Empty star (outline)
+    empty_star = pygame.Surface((50, 50), pygame.SRCALPHA)
+    pygame.draw.polygon(empty_star, WHITE, [
+        (25, 0), (32, 18), (50, 18), (35, 30),
+        (42, 50), (25, 38), (8, 50), (15, 30),
+        (0, 18), (18, 18)
+    ], 2)
+    
+    rating = None
+    while rating is None:
+        screen.fill(BLACK)
+        screen.blit(title, (WIDTH//2 - title.get_width()//2, HEIGHT//3))
+        screen.blit(instruction, (WIDTH//2 - instruction.get_width()//2, HEIGHT//3 + 50))
+        
+        # Draw stars
+        star_spacing = 60
+        total_width = star_spacing * 5
+        start_x = WIDTH//2 - total_width//2
+        
+        # Get mouse position for hover effect
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        hover_rating = None
+        
+        for i in range(5):
+            star_x = start_x + i * star_spacing
+            star_rect = pygame.Rect(star_x, HEIGHT//2, 50, 50)
+            
+            # Check if mouse is hovering over this star
+            if star_rect.collidepoint(mouse_x, mouse_y):
+                hover_rating = i + 1
+            
+            # Draw filled or empty stars based on hover
+            if hover_rating is not None and i < hover_rating:
+                screen.blit(star_surface, (star_x, HEIGHT//2))
+            else:
+                screen.blit(empty_star, (star_x, HEIGHT//2))
+        
+        # Show hover message
+        if hover_rating is not None:
+            messages = {
+                1: "Poor",
+                2: "Fair",
+                3: "Good",
+                4: "Great",
+                5: "Amazing!"
+            }
+            hover_text = font.render(messages[hover_rating], True, YELLOW)
+            screen.blit(hover_text, (WIDTH//2 - hover_text.get_width()//2, HEIGHT//2 + 80))
+        
+        pygame.display.flip()
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5]:
+                    rating = event.key - pygame.K_0
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if hover_rating is not None:
+                    rating = hover_rating
+    
+    return rating
+
 # Main game function
 def game():
     # Import math here for asteroid polygon generation
@@ -1202,6 +1282,14 @@ def game():
     boss_group = pygame.sprite.Group()
     boss_bullets = pygame.sprite.Group()
     
+    # Add level skip option
+    skip_to_50 = False
+    if len(sys.argv) > 1 and sys.argv[1] == "--level50":
+        level = 50
+        skip_to_50 = True
+    else:
+        level = 1
+    
     while running:
         # Keep loop running at the right speed
         clock.tick(60)
@@ -1306,7 +1394,7 @@ def game():
         if boss_group:
             # Boss shooting
             for boss in boss_group:
-                new_bullets = boss.shoot()
+                new_bullets = boss.shoot(player)  # Pass player reference
                 for bullet in new_bullets:
                     all_sprites.add(bullet)
                     boss_bullets.add(bullet)
@@ -1616,25 +1704,79 @@ def game():
     player_name_text = font.render(f"Player: {player_name}", True, WHITE)
     screen.blit(player_name_text, (WIDTH//2 - player_name_text.get_width()//2, HEIGHT//2))
     
+    rate_text = font.render("Press SPACE to rate the game", True, YELLOW)
+    screen.blit(rate_text, (WIDTH//2 - rate_text.get_width()//2, HEIGHT//2 + 40))
+    
     high_score_text = font.render("Press H to view high scores", True, WHITE)
-    screen.blit(high_score_text, (WIDTH//2 - high_score_text.get_width()//2, HEIGHT//2 + 40))
+    screen.blit(high_score_text, (WIDTH//2 - high_score_text.get_width()//2, HEIGHT//2 + 80))
     
     restart_text = font.render("Press R to restart or ESC to quit", True, WHITE)
-    screen.blit(restart_text, (WIDTH//2 - restart_text.get_width()//2, HEIGHT//2 + 80))
+    screen.blit(restart_text, (WIDTH//2 - restart_text.get_width()//2, HEIGHT//2 + 120))
     
     pygame.display.flip()
     
-    # Wait for restart or quit
+    # Wait for player input
     waiting = True
+    rated = False
     while waiting:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_r:
+                if event.key == pygame.K_SPACE and not rated:
+                    # Show rating screen
+                    rating = display_rating_screen()
+                    rated = True
+                    
+                    # If 5-star rating, offer level 50 shortcut
+                    if rating == 5:
+                        screen.fill(BLACK)
+                        
+                        # Create special effect for the unlock message
+                        unlock_font = pygame.font.Font(None, 60)
+                        unlock_text = unlock_font.render("SPECIAL UNLOCK!", True, YELLOW)
+                        screen.blit(unlock_text, (WIDTH//2 - unlock_text.get_width()//2, HEIGHT//3))
+                        
+                        message_font = pygame.font.Font(None, 36)
+                        message1 = message_font.render("Thanks for the 5-star rating!", True, WHITE)
+                        message2 = message_font.render("You've unlocked a special shortcut to Level 50", True, WHITE)
+                        message3 = message_font.render("Press L to start at Level 50 or R for regular start", True, ORANGE)
+                        
+                        screen.blit(message1, (WIDTH//2 - message1.get_width()//2, HEIGHT//2))
+                        screen.blit(message2, (WIDTH//2 - message2.get_width()//2, HEIGHT//2 + 40))
+                        screen.blit(message3, (WIDTH//2 - message3.get_width()//2, HEIGHT//2 + 80))
+                        
+                        pygame.display.flip()
+                    else:
+                        # Show thank you message for other ratings
+                        screen.fill(BLACK)
+                        thank_you = font.render(f"Thanks for your {rating}-star rating!", True, WHITE)
+                        continue_text = font.render("Press any key to continue", True, WHITE)
+                        
+                        screen.blit(thank_you, (WIDTH//2 - thank_you.get_width()//2, HEIGHT//2))
+                        screen.blit(continue_text, (WIDTH//2 - continue_text.get_width()//2, HEIGHT//2 + 40))
+                        
+                        pygame.display.flip()
+                        
+                        # Wait for key press
+                        waiting_rating = True
+                        while waiting_rating:
+                            for e in pygame.event.get():
+                                if e.type == pygame.KEYDOWN:
+                                    waiting_rating = False
+                                elif e.type == pygame.QUIT:
+                                    pygame.quit()
+                                    sys.exit()
+                
+                elif event.key == pygame.K_r:
                     waiting = False
-                    game()  # Restart game
+                    game()  # Regular restart
+                elif event.key == pygame.K_l and rated and rating == 5:
+                    waiting = False
+                    # Start new game at level 50
+                    sys.argv = [sys.argv[0], "--level50"]
+                    game()
                 elif event.key == pygame.K_h:
                     display_high_scores(high_scores)
                 elif event.key == pygame.K_ESCAPE:
