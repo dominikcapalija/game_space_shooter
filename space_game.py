@@ -672,7 +672,6 @@ class PowerUp(pygame.sprite.Sprite):
         ])
         
         size = 30
-        self.base_size = size
         self.image = pygame.Surface((size, size), pygame.SRCALPHA)
         
         # Draw power-up based on type
@@ -708,21 +707,21 @@ class PowerUp(pygame.sprite.Sprite):
             pygame.draw.polygon(self.image, color, [(0, size//2), (size//2, size//4), (size//2, size*3//4)])
             pygame.draw.polygon(self.image, color, [(size//2, size//2), (size, size//4), (size, size*3//4)])
         
-        self.original_image = self.image.copy()
         self.rect = self.image.get_rect()
+        self.rect.centerx = x
+        self.rect.centery = y
         
-        # Start near vanishing point
-        angle = random.uniform(0, 2 * math.pi)
-        distance = random.randint(20, 50)
-        self.rect.centerx = self.vanishing_point[0] + math.cos(angle) * distance
-        self.rect.centery = self.vanishing_point[1] + math.sin(angle) * distance
-        
-        self.z = random.uniform(0.1, 0.3)
-        self.z_speed = 0.003
+        # Movement attributes
+        self.speedy = random.randrange(2, 5)
+        self.speedx = random.randrange(-2, 2)
 
     def update(self):
-        self.update_perspective()
-        if self.z >= 1.0:
+        # Move the power-up
+        self.rect.y += self.speedy
+        self.rect.x += self.speedx
+        
+        # Remove if it goes off screen
+        if self.rect.top > HEIGHT + 10 or self.rect.left < -25 or self.rect.right > WIDTH + 25:
             self.kill()
 
 class StrayBomb(pygame.sprite.Sprite):
@@ -2185,6 +2184,12 @@ def game():
                 asteroid = Asteroid(level)
                 all_sprites.add(asteroid)
                 asteroids.add(asteroid)
+                
+                # Small chance to spawn power-up from asteroid
+                if random.random() < 0.1:  # 10% chance
+                    power_up = PowerUp(hit.rect.centerx, hit.rect.centery)
+                    all_sprites.add(power_up)
+                    power_ups.add(power_up)
             
             # Player bullet hits enemy
             hits = pygame.sprite.groupcollide(enemies, bullets, True, True)
@@ -2194,6 +2199,18 @@ def game():
                 enemy = EnemyShip(level)
                 all_sprites.add(enemy)
                 enemies.add(enemy)
+                
+                # Higher chance to spawn power-up from enemy
+                if random.random() < 0.3:  # 30% chance
+                    power_up = PowerUp(hit.rect.centerx, hit.rect.centery)
+                    all_sprites.add(power_up)
+                    power_ups.add(power_up)
+        
+        # Check if player collects power-up
+        power_up_hits = pygame.sprite.spritecollide(player, power_ups, True)
+        for power_up in power_up_hits:
+            player.add_power_up(power_up.type)
+            score += 25  # Bonus points for collecting power-up
         
         # Check if player is hit
         if not player.is_invincible:
@@ -2239,6 +2256,61 @@ def game():
         level_text = font.render(f"Level: {level}", True, WHITE)
         screen.blit(score_text, (10, 10))
         screen.blit(level_text, (10, 50))
+        
+        # Draw active power-up icons
+        icon_size = 30
+        icon_spacing = 40
+        icon_y = 90
+        for i, power_up_type in enumerate(player.power_ups):
+            icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+            
+            if power_up_type == PowerUp.RAPID_FIRE:
+                color = YELLOW
+                # Draw lightning bolt
+                points = [(icon_size//2, 0), (icon_size, icon_size//2), 
+                         (icon_size*2//3, icon_size*3//5), (icon_size, icon_size), 
+                         (0, icon_size*3//5), (icon_size//3, icon_size*2//5)]
+                pygame.draw.polygon(icon, color, points)
+            elif power_up_type == PowerUp.DOUBLE_SHOT:
+                color = PURPLE
+                # Draw double circle
+                pygame.draw.circle(icon, color, (icon_size//4, icon_size//2), icon_size//4)
+                pygame.draw.circle(icon, color, (icon_size*3//4, icon_size//2), icon_size//4)
+            elif power_up_type == PowerUp.TRIPLE_SHOT:
+                color = RED
+                # Draw triple circle
+                pygame.draw.circle(icon, color, (icon_size//5, icon_size//2), icon_size//5)
+                pygame.draw.circle(icon, color, (icon_size//2, icon_size//4), icon_size//5)
+                pygame.draw.circle(icon, color, (icon_size*4//5, icon_size//2), icon_size//5)
+            elif power_up_type == PowerUp.SUPER_RAPID_FIRE:
+                color = ORANGE
+                # Draw double lightning bolt
+                points1 = [(icon_size//4, 0), (icon_size//2, icon_size//2), 
+                          (icon_size//3, icon_size*3//5), (icon_size//2, icon_size), 
+                          (0, icon_size*3//5), (icon_size//6, icon_size//2)]
+                points2 = [(icon_size*3//4, 0), (icon_size, icon_size//2), 
+                          (icon_size*5//6, icon_size*3//5), (icon_size, icon_size), 
+                          (icon_size//2, icon_size*3//5), (icon_size*2//3, icon_size//2)]
+                pygame.draw.polygon(icon, color, points1)
+                pygame.draw.polygon(icon, color, points2)
+            elif power_up_type == PowerUp.RAPID_MOVEMENT:
+                color = LIGHT_BLUE
+                # Draw speed arrows
+                pygame.draw.polygon(icon, color, [(0, icon_size//2), (icon_size//2, icon_size//4), 
+                                                (icon_size//2, icon_size*3//4)])
+                pygame.draw.polygon(icon, color, [(icon_size//2, icon_size//2), (icon_size, icon_size//4), 
+                                                (icon_size, icon_size*3//4)])
+            
+            screen.blit(icon, (10 + i * icon_spacing, icon_y))
+            
+            # Draw remaining time bar
+            time_remaining = (player.power_up_duration - (pygame.time.get_ticks() - player.power_up_start)) / player.power_up_duration
+            if time_remaining > 0:
+                bar_width = icon_size
+                bar_height = 4
+                pygame.draw.rect(screen, (64, 64, 64), (10 + i * icon_spacing, icon_y + icon_size + 2, bar_width, bar_height))
+                pygame.draw.rect(screen, color, (10 + i * icon_spacing, icon_y + icon_size + 2, 
+                                               int(bar_width * time_remaining), bar_height))
         
         # Draw boss health bar if boss exists
         for boss in boss_group:
