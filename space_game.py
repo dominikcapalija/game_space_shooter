@@ -14,6 +14,259 @@ pygame.mixer.pre_init(44100, -16, 2, 1024)  # Smaller buffer size
 pygame.mixer.init()
 pygame.init()
 
+# Screen dimensions
+WIDTH, HEIGHT = 1280, 1280
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Space Asteroid Shooter")
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+YELLOW = (255, 255, 0)
+PURPLE = (255, 0, 255)
+ORANGE = (255, 165, 0)
+LIGHT_BLUE = (100, 200, 255)
+
+# Grey shades for asteroids and effects
+GREY = (128, 128, 128)
+DARK_GREY = (64, 64, 64)
+MEDIUM_GREY = (96, 96, 96)
+LIGHT_GREY = (192, 192, 192)
+CRATER_GREY = (48, 48, 48)
+
+# Initialize game control variables
+ESC_QUIT_GAME = False
+ESC_WELCOME_SCREEN = True
+total_score = 0  # Initialize global total_score
+
+# Add after the imports at the top
+FULLSCREEN = False
+
+def toggle_fullscreen():
+    global FULLSCREEN, screen, WIDTH, HEIGHT
+    FULLSCREEN = not FULLSCREEN
+    if FULLSCREEN:
+        # Store the current window size before going fullscreen
+        screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        WIDTH, HEIGHT = screen.get_size()
+    else:
+        # Return to windowed mode with original size
+        WIDTH, HEIGHT = 800, 600  # Original window size
+        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+class ParticleSystem:
+    def __init__(self):
+        self.particles = []
+
+    def add_particle(self, x, y, color, velocity_x, velocity_y, lifetime, size=2, fade=True, glow=False, z=1.0):
+        particle = {
+            'x': x,
+            'y': y,
+            'z': z,  # Depth factor (0.1 to 1.0)
+            'color': color,
+            'velocity_x': velocity_x * z,  # Particles closer move faster
+            'velocity_y': velocity_y * z,
+            'lifetime': lifetime,
+            'max_lifetime': lifetime,
+            'size': size * z,  # Larger particles appear closer
+            'fade': fade,
+            'glow': glow,
+            'alpha': 255
+        }
+        self.particles.append(particle)
+
+    def update(self):
+        # Update all particles in a single list comprehension for better performance
+        self.particles = [p for p in self.particles if p['lifetime'] > 0]
+        
+        for p in self.particles:
+            p['x'] += p['velocity_x']
+            p['y'] += p['velocity_y']
+            p['lifetime'] -= 1
+            
+            if p['fade']:
+                fade_ratio = p['lifetime'] / p['max_lifetime']
+                p['alpha'] = int(255 * fade_ratio)
+
+    def draw(self, surface):
+        # Sort particles by depth for proper rendering
+        sorted_particles = sorted(self.particles, key=lambda p: p['z'])
+        
+        # Create a surface for glowing particles
+        if any(p['glow'] for p in sorted_particles):
+            glow_surface = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        
+        for p in sorted_particles:
+            pos = (int(p['x']), int(p['y']))
+            
+            # Calculate color with alpha
+            color = list(p['color'])
+            if len(color) < 4:
+                color.append(p['alpha'])
+            else:
+                color[3] = p['alpha']
+            
+            # Draw particle shadow for depth effect
+            if p['z'] > 0.5:  # Only draw shadows for closer particles
+                shadow_offset = int(4 * p['z'])
+                shadow_size = int(p['size'] * 1.5)
+                shadow_alpha = int(100 * p['z'])
+                shadow_surface = pygame.Surface((shadow_size * 2, shadow_size * 2), pygame.SRCALPHA)
+                pygame.draw.circle(shadow_surface, (0, 0, 0, shadow_alpha), 
+                                 (shadow_size, shadow_size), shadow_size)
+                surface.blit(shadow_surface, 
+                           (pos[0] - shadow_size + shadow_offset, 
+                            pos[1] - shadow_size + shadow_offset))
+            
+            # Draw glowing effect
+            if p['glow']:
+                glow_size = int(p['size'] * 2)
+                glow_color = (*p['color'][:3], int(p['alpha'] * 0.5))
+                glow_surface = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
+                pygame.draw.circle(glow_surface, glow_color, (glow_size, glow_size), glow_size)
+                surface.blit(glow_surface, (pos[0] - glow_size, pos[1] - glow_size))
+            
+            # Draw main particle
+            pygame.draw.circle(surface, color, pos, int(p['size']))
+
+class StarField:
+    def __init__(self, num_stars=100):
+        self.stars = []
+        # Create multiple layers of stars for parallax effect
+        for _ in range(num_stars):
+            # z determines the star's depth (0.1 to 1.0)
+            z = random.uniform(0.1, 1.0)
+            self.stars.append({
+                'x': random.randrange(0, WIDTH),
+                'y': random.randrange(0, HEIGHT),
+                'z': z,  # Depth factor
+                'size': max(1, int(3 * z)),  # Larger stars appear closer
+                'brightness': int(255 * z),  # Brighter stars appear closer
+                'speed': 2 * z  # Stars closer to viewer move faster
+            })
+    
+    def update(self, player_velocity_x=0, player_velocity_y=0):
+        for star in self.stars:
+            # Parallax movement based on star's depth
+            move_x = -player_velocity_x * star['z']
+            move_y = -player_velocity_y * star['z']
+            
+            star['x'] += move_x
+            star['y'] += move_y
+            
+            # Wrap stars around screen
+            if star['x'] < 0:
+                star['x'] = WIDTH
+            elif star['x'] > WIDTH:
+                star['x'] = 0
+            if star['y'] < 0:
+                star['y'] = HEIGHT
+            elif star['y'] > HEIGHT:
+                star['y'] = 0
+    
+    def draw(self, surface):
+        # Draw stars from back to front
+        sorted_stars = sorted(self.stars, key=lambda x: x['z'])
+        for star in sorted_stars:
+            # Create a glowing effect for closer stars
+            if star['z'] > 0.7:  # Only closest stars glow
+                glow_size = int(star['size'] * 2)
+                glow_surface = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
+                glow_color = (255, 255, 255, int(100 * star['z']))
+                pygame.draw.circle(glow_surface, glow_color, (glow_size, glow_size), glow_size)
+                surface.blit(glow_surface, (star['x'] - glow_size, star['y'] - glow_size))
+            
+            # Draw the star
+            color = (star['brightness'], star['brightness'], star['brightness'])
+            pygame.draw.circle(surface, color, (int(star['x']), int(star['y'])), star['size'])
+
+# Initialize particle system and star field globally
+particle_system = ParticleSystem()
+star_field = StarField(150)  # Increased number of stars for more depth
+
+def create_space_dust(x, y, count=1):
+    for _ in range(count):
+        z = random.uniform(0.1, 1.0)  # Random depth
+        angle = random.uniform(0, math.pi * 2)
+        speed = random.uniform(1, 3) * z  # Faster if closer
+        velocity_x = math.cos(angle) * speed
+        velocity_y = math.sin(angle) * speed
+        particle_system.add_particle(
+            x, y,
+            (200, 200, 255),
+            velocity_x, velocity_y,
+            random.randint(20, 40),
+            size=1,
+            fade=True,
+            glow=False,
+            z=z
+        )
+
+def create_engine_trail(x, y, color=(255, 165, 0)):
+    z = random.uniform(0.6, 1.0)  # Engine trails are always closer
+    particle_system.add_particle(
+        x, y,
+        color,
+        random.uniform(-0.5, 0.5),
+        random.uniform(1, 2),
+        random.randint(10, 20),
+        size=2,
+        fade=True,
+        glow=True,
+        z=z
+    )
+
+def create_explosion_particles(x, y, intensity=1.0):
+    num_particles = int(20 * intensity)
+    for _ in range(num_particles):
+        z = random.uniform(0.3, 1.0)  # Varying depths for more realistic explosion
+        angle = random.uniform(0, math.pi * 2)
+        speed = random.uniform(2, 5) * intensity * z
+        velocity_x = math.cos(angle) * speed
+        velocity_y = math.sin(angle) * speed
+        
+        # Core explosion particles (orange/red)
+        particle_system.add_particle(
+            x, y,
+            (255, random.randint(100, 165), 0),
+            velocity_x, velocity_y,
+            random.randint(20, 40),
+            size=3 * intensity,
+            fade=True,
+            glow=True,
+            z=z
+        )
+        
+        # Smoke particles (grey)
+        smoke_z = z * 0.8  # Smoke slightly further back
+        particle_system.add_particle(
+            x, y,
+            (100, 100, 100),
+            velocity_x * 0.5, velocity_y * 0.5,
+            random.randint(30, 60),
+            size=4 * intensity,
+            fade=True,
+            glow=False,
+            z=smoke_z
+        )
+        
+        # Spark particles
+        if random.random() < 0.3:  # 30% chance for each spark
+            spark_z = z * 1.2  # Sparks slightly closer
+            particle_system.add_particle(
+                x, y,
+                (255, 255, 200),
+                velocity_x * 1.5, velocity_y * 1.5,
+                random.randint(10, 20),
+                size=1,
+                fade=True,
+                glow=True,
+                z=spark_z
+            )
+
 # Test pygame mixer
 print("Testing pygame mixer...")
 try:
@@ -229,22 +482,6 @@ def test_sounds():
 # Run sound test
 test_sounds()
 
-# Screen dimensions
-WIDTH, HEIGHT = 1280, 1280
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Space Asteroid Shooter")
-
-# Colors
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
-BLUE = (0, 0, 255)
-GREEN = (0, 255, 0)
-BROWN = (165, 42, 42)
-YELLOW = (255, 255, 0)
-PURPLE = (128, 0, 128)
-ORANGE = (255, 165, 0)
-
 # Explosion class
 class Explosion(pygame.sprite.Sprite):
     def __init__(self, center_x, center_y):
@@ -272,96 +509,249 @@ class Explosion(pygame.sprite.Sprite):
         self.image.fill((0, 0, 0, 0))  # Clear with transparent
         pygame.draw.circle(self.image, (*ORANGE, 128), (self.radius, self.radius), self.current_radius)
 
-# StrayBomb class
-class StrayBomb(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+class Asteroid(pygame.sprite.Sprite):
+    def __init__(self, level=1):
         super().__init__()
-        self.size = 40  # Increased size to accommodate larger radius
-        self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        self.level = level
         
-        # Draw bomb as red circle with fuse
-        pygame.draw.circle(self.image, RED, (self.size//2, self.size//2), 20)  # Radius increased to 20
-        pygame.draw.line(self.image, YELLOW, (self.size//2, 0), (self.size//2, self.size//4), 2)
+        # Size based on level
+        base_size = random.randint(30, 60)
+        size_multiplier = 1 + (level - 1) * 0.2  # Increase size with level
+        self.size = int(base_size * size_multiplier)
         
+        # Create surface with alpha for smooth edges
+        self.original_image = pygame.Surface((self.size * 2, self.size * 2), pygame.SRCALPHA)
+        self.image = self.original_image
         self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.speedy = random.randint(1, 3)
-        self.speedx = random.randint(-2, 2)
-    
+        
+        # Random starting position
+        self.rect.x = random.randint(0, WIDTH - self.rect.width)
+        self.rect.y = -self.rect.height
+        
+        # Generate polygon points for irregular shape
+        num_points = random.randint(12, 16)
+        angles = [i * (2 * math.pi / num_points) for i in range(num_points)]
+        self.points = []
+        for angle in angles:
+            # Add some noise to radius for irregularity
+            radius = self.size * (0.8 + random.random() * 0.4)
+            x = self.size + math.cos(angle) * radius
+            y = self.size + math.sin(angle) * radius
+            self.points.append((x, y))
+        
+        # Base color varies slightly with random grey tone
+        base_grey = random.randint(-20, 20)  # Random variation
+        self.color = (
+            min(255, max(0, MEDIUM_GREY[0] + base_grey)),
+            min(255, max(0, MEDIUM_GREY[1] + base_grey)),
+            min(255, max(0, MEDIUM_GREY[2] + base_grey))
+        )
+        
+        # Draw the asteroid
+        pygame.draw.polygon(self.original_image, self.color, self.points)
+        
+        # Add craters
+        num_craters = random.randint(3, 7)
+        for _ in range(num_craters):
+            crater_x = random.randint(self.size // 2, int(self.size * 1.5))
+            crater_y = random.randint(self.size // 2, int(self.size * 1.5))
+            crater_radius = random.randint(3, 8)
+            pygame.draw.circle(self.original_image, CRATER_GREY, (crater_x, crater_y), crater_radius)
+        
+        # Add highlights for 3D effect
+        for point in self.points:
+            pygame.draw.circle(self.original_image, LIGHT_GREY, (int(point[0]), int(point[1])), 2)
+        
+        # Physics attributes
+        self.velocity_x = random.uniform(-2, 2)
+        self.velocity_y = random.uniform(2, 4) + level * 0.5
+        self.angle = random.uniform(0, 360)
+        self.rotation_speed = random.uniform(-3, 3)
+        
+        # Debris system
+        self.debris = []
+        self.last_debris = 0
+        self.debris_interval = 100  # Milliseconds between debris spawns
+        
     def update(self):
-        self.rect.y += self.speedy
-        self.rect.x += self.speedx
+        # Update position with velocity
+        self.rect.y += self.velocity_y
+        self.rect.x += self.velocity_x
         
-        # Bounce off screen edges
-        if self.rect.left < 0 or self.rect.right > WIDTH:
-            self.speedx = -self.speedx
+        # Rotate asteroid
+        self.angle = (self.angle + self.rotation_speed) % 360
+        self.image = pygame.transform.rotate(self.original_image, self.angle)
+        old_center = self.rect.center
+        self.rect = self.image.get_rect()
+        self.rect.center = old_center
         
-        # Kill if moves off bottom of screen
-        if self.rect.top > HEIGHT:
+        # Add occasional debris
+        self.last_debris += 1
+        if self.last_debris >= self.debris_interval:  # Every 100 frames
+            self.last_debris = 0
+            if random.random() < 0.3:  # 30% chance
+                self.debris.append({
+                    'x': self.rect.centerx,
+                    'y': self.rect.centery,
+                    'velocity_x': random.uniform(-1, 1),
+                    'velocity_y': random.uniform(-1, 1),
+                    'lifetime': 30,  # Frames the debris will exist
+                    'color': self.color
+                })
+        
+        # Update existing debris
+        for debris in self.debris[:]:  # Copy list to safely remove items
+            debris['x'] += debris['velocity_x']
+            debris['y'] += debris['velocity_y']
+            debris['lifetime'] -= 1
+            if debris['lifetime'] <= 0:
+                self.debris.remove(debris)
+        
+        # If asteroid goes off screen, respawn it
+        if (self.rect.top > HEIGHT + 10 or 
+            self.rect.left < -25 or 
+            self.rect.right > WIDTH + 25):
+            self.rect.x = random.randrange(WIDTH - self.rect.width)
+            self.rect.y = random.randrange(-100, -40)
+            self.velocity_y = random.uniform(2, 4) + self.level * 0.5
+            self.velocity_x = random.uniform(-2, 2)
+    
+    def draw_debris(self, surface):
+        for debris in self.debris:
+            alpha = min(255, debris['lifetime'] * 8)  # Fade out as lifetime decreases
+            color = debris['color'] + (alpha,)  # Add alpha value
+            pygame.draw.circle(surface, color, (int(debris['x']), int(debris['y'])), 1)
+
+class EnemyShip(pygame.sprite.Sprite):
+    def __init__(self, level=1):
+        super().__init__()
+        size = 40
+        self.base_size = size
+        self.image = pygame.Surface((size, size), pygame.SRCALPHA)
+        
+        # Draw the enemy ship
+        points = [(size//2, 0), (0, size), (size//2, size*3//4), (size, size)]
+        pygame.draw.polygon(self.image, RED, points)
+        pygame.draw.polygon(self.image, (200, 0, 0), points, 2)
+        
+        self.original_image = self.image.copy()
+        self.rect = self.image.get_rect()
+        
+        # Start near vanishing point
+        angle = random.uniform(0, 2 * math.pi)
+        distance = random.randint(20, 50)
+        self.rect.centerx = self.vanishing_point[0] + math.cos(angle) * distance
+        self.rect.centery = self.vanishing_point[1] + math.sin(angle) * distance
+        
+        self.z = random.uniform(0.1, 0.3)
+        self.z_speed = 0.004 * level
+
+    def update(self):
+        self.update_perspective()
+        if self.z >= 1.0:
             self.kill()
 
-# PowerUp class
 class PowerUp(pygame.sprite.Sprite):
+    # Power-up types
     RAPID_FIRE = "rapid_fire"
     DOUBLE_SHOT = "double_shot"
-    TRIPLE_SHOT = "triple_shot"  # New power-up
-    SUPER_RAPID_FIRE = "super_rapid_fire"  # New power-up
-    RAPID_MOVEMENT = "rapid_movement"  # New power-up
+    TRIPLE_SHOT = "triple_shot"
+    SUPER_RAPID_FIRE = "super_rapid_fire"
+    RAPID_MOVEMENT = "rapid_movement"
     
     def __init__(self, x, y):
-        super().__init__()
-        # Increase double shot frequency by adding it multiple times to the choice list
-        self.type = random.choice([
-            PowerUp.RAPID_FIRE,
-            PowerUp.DOUBLE_SHOT,
-            PowerUp.DOUBLE_SHOT,  # Added twice for higher frequency
-            PowerUp.DOUBLE_SHOT,  # Added thrice for higher frequency
-            PowerUp.TRIPLE_SHOT,
-            PowerUp.SUPER_RAPID_FIRE,
-            PowerUp.RAPID_MOVEMENT
-        ])
-        self.size = 20
-        self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        pygame.sprite.Sprite.__init__(self)
         
-        # Create power-up icon
-        if self.type == PowerUp.RAPID_FIRE:
+        # Select power-up type with weighted probabilities
+        self.type = random.choice([
+            self.RAPID_FIRE,
+            self.DOUBLE_SHOT, self.DOUBLE_SHOT, self.DOUBLE_SHOT,  # Higher chance for double shot
+            self.TRIPLE_SHOT,
+            self.SUPER_RAPID_FIRE,
+            self.RAPID_MOVEMENT
+        ])
+        
+        size = 30
+        self.base_size = size
+        self.image = pygame.Surface((size, size), pygame.SRCALPHA)
+        
+        # Draw power-up based on type
+        if self.type == self.RAPID_FIRE:
             color = YELLOW
             # Draw lightning bolt
-            points = [(10, 0), (20, 8), (13, 12), (20, 20), (0, 12), (7, 8)]
+            points = [(size//2, 0), (size, size//2), (size*2//3, size*3//5), (size, size), 
+                     (0, size*3//5), (size//3, size*2//5)]
             pygame.draw.polygon(self.image, color, points)
-        elif self.type == PowerUp.DOUBLE_SHOT:
+        elif self.type == self.DOUBLE_SHOT:
             color = PURPLE
             # Draw double circle
-            pygame.draw.circle(self.image, color, (5, 10), 5)
-            pygame.draw.circle(self.image, color, (15, 10), 5)
-        elif self.type == PowerUp.TRIPLE_SHOT:
+            pygame.draw.circle(self.image, color, (size//4, size//2), size//4)
+            pygame.draw.circle(self.image, color, (size*3//4, size//2), size//4)
+        elif self.type == self.TRIPLE_SHOT:
             color = RED
             # Draw triple circle
-            pygame.draw.circle(self.image, color, (4, 10), 4)
-            pygame.draw.circle(self.image, color, (10, 5), 4)
-            pygame.draw.circle(self.image, color, (16, 10), 4)
-        elif self.type == PowerUp.SUPER_RAPID_FIRE:
-            color = (255, 128, 0)  # Bright orange
+            pygame.draw.circle(self.image, color, (size//5, size//2), size//5)
+            pygame.draw.circle(self.image, color, (size//2, size//4), size//5)
+            pygame.draw.circle(self.image, color, (size*4//5, size//2), size//5)
+        elif self.type == self.SUPER_RAPID_FIRE:
+            color = ORANGE
             # Draw double lightning bolt
-            points1 = [(5, 0), (10, 8), (7, 12), (10, 20), (0, 12), (3, 8)]
-            points2 = [(15, 0), (20, 8), (17, 12), (20, 20), (10, 12), (13, 8)]
+            points1 = [(size//4, 0), (size//2, size//2), (size//3, size*3//5), 
+                      (size//2, size), (0, size*3//5), (size//6, size//2)]
+            points2 = [(size*3//4, 0), (size, size//2), (size*5//6, size*3//5), 
+                      (size, size), (size//2, size*3//5), (size*2//3, size//2)]
             pygame.draw.polygon(self.image, color, points1)
             pygame.draw.polygon(self.image, color, points2)
         else:  # RAPID_MOVEMENT
-            color = (0, 255, 255)  # Cyan
+            color = LIGHT_BLUE
             # Draw speed arrows
-            pygame.draw.polygon(self.image, color, [(0, 10), (8, 5), (8, 15)])  # Left arrow
-            pygame.draw.polygon(self.image, color, [(12, 10), (20, 5), (20, 15)])  # Right arrow
+            pygame.draw.polygon(self.image, color, [(0, size//2), (size//2, size//4), (size//2, size*3//4)])
+            pygame.draw.polygon(self.image, color, [(size//2, size//2), (size, size//4), (size, size*3//4)])
         
+        self.original_image = self.image.copy()
         self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.speedy = 3
-    
+        
+        # Start near vanishing point
+        angle = random.uniform(0, 2 * math.pi)
+        distance = random.randint(20, 50)
+        self.rect.centerx = self.vanishing_point[0] + math.cos(angle) * distance
+        self.rect.centery = self.vanishing_point[1] + math.sin(angle) * distance
+        
+        self.z = random.uniform(0.1, 0.3)
+        self.z_speed = 0.003
+
     def update(self):
-        self.rect.y += self.speedy
-        if self.rect.top > HEIGHT:
+        self.update_perspective()
+        if self.z >= 1.0:
+            self.kill()
+
+class StrayBomb(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        
+        size = 20
+        self.base_size = size
+        self.image = pygame.Surface((size, size), pygame.SRCALPHA)
+        
+        # Draw bomb
+        pygame.draw.circle(self.image, RED, (size//2, size//2), size//2)
+        pygame.draw.circle(self.image, (200, 0, 0), (size//2, size//2), size//2 - 2)
+        
+        self.original_image = self.image.copy()
+        self.rect = self.image.get_rect()
+        
+        # Start near vanishing point
+        angle = random.uniform(0, 2 * math.pi)
+        distance = random.randint(20, 50)
+        self.rect.centerx = self.vanishing_point[0] + math.cos(angle) * distance
+        self.rect.centery = self.vanishing_point[1] + math.sin(angle) * distance
+        
+        self.z = random.uniform(0.1, 0.3)
+        self.z_speed = 0.005
+
+    def update(self):
+        self.update_perspective()
+        if self.z >= 1.0:
             self.kill()
 
 # Ship class
@@ -371,53 +761,135 @@ class Ship(pygame.sprite.Sprite):
         self.image = image
         self.rect = self.image.get_rect()
         self.rect.centerx = WIDTH // 2
-        self.rect.bottom = HEIGHT - 100  # Start higher to allow vertical movement
-        self.base_speed = speed  # Store base speed
-        self.speed = speed
-        self.base_shoot_delay = 250  # milliseconds
+        self.rect.bottom = HEIGHT - 100
+        self.player_name = player_name  # Store player name
+        
+        # Apply speed boost from shop
+        speed_boost = next((item.effect_value for item in SHOP_ITEMS 
+                          if item.effect_type == "speed" and item.purchased), 0)
+        self.base_speed = speed + speed_boost
+        self.speed = self.base_speed
+        
+        # Apply fire rate boost from shop
+        fire_rate_boost = next((item.effect_value for item in SHOP_ITEMS 
+                              if item.effect_type == "fire_rate" and item.purchased), 1)
+        self.base_shoot_delay = int(250 / fire_rate_boost)
         self.shoot_delay = self.base_shoot_delay
+        
         self.last_shot = pygame.time.get_ticks()
         
-        # Special mode check
-        self.is_invincible = player_name == "12345"
+        # Apply extra health from shop
+        self.extra_health = next((item.effect_value for item in SHOP_ITEMS 
+                                if item.effect_type == "health" and item.purchased), 0)
         
-        # Power-up attributes
+        # Apply shield from shop
+        self.shield_time = next((item.effect_value for item in SHOP_ITEMS 
+                               if item.effect_type == "shield_time" and item.purchased), 0)
+        if self.shield_time > 0:
+            self.is_invincible = True
+            self.shield_start = pygame.time.get_ticks()
+        else:
+            self.is_invincible = player_name == "12345"  # Set initial invincibility
+        
+        # Apply starting power-ups from shop
         self.power_ups = set()
+        start_powerup = next((item.effect_value for item in SHOP_ITEMS 
+                            if item.effect_type == "start_powerup" and item.purchased), None)
+        if start_powerup:
+            self.power_ups.add(start_powerup)
+        
         self.power_up_start = 0
-        self.power_up_duration = 50000  # 50 seconds
+        self.power_up_duration = 50000
         
         # Movement boundaries
-        self.min_y = 50  # Leave some space at top
-        self.max_y = HEIGHT - 50  # Leave some space at bottom
+        self.min_y = 50
+        self.max_y = HEIGHT - 50
+        
+        # Physics attributes - adjusted for better control
+        self.velocity_x = 0
+        self.velocity_y = 0
+        self.max_velocity = 8  # Reduced from 15
+        self.thrust = 1.0  # Increased from 0.5
+        self.friction = 0.85  # Increased from 0.98 (more friction)
+        self.rotation = 0
+        self.rotation_speed = 3
+        
+        # Add deceleration when no keys are pressed
+        self.deceleration = 0.92  # New attribute for quick stopping
     
     def update(self):
+        # Update shield timer
+        if self.shield_time > 0:
+            now = pygame.time.get_ticks()
+            if now - self.shield_start > self.shield_time * 1000:  # Convert to milliseconds
+                self.shield_time = 0
+                # Only disable invincibility if not using the special name
+                if self.player_name != "12345":
+                    self.is_invincible = False
+        
+        # Get keyboard input
         keys = pygame.key.get_pressed()
         movement_speed = self.speed * 2 if PowerUp.RAPID_MOVEMENT in self.power_ups else self.speed
         
-        # Horizontal movement
-        if keys[pygame.K_LEFT]:
-            self.rect.x -= movement_speed
-        if keys[pygame.K_RIGHT]:
-            self.rect.x += movement_speed
-            
-        # Vertical movement
-        if keys[pygame.K_UP]:
-            self.rect.y -= movement_speed
-        if keys[pygame.K_DOWN]:
-            self.rect.y += movement_speed
+        # Track if any movement keys are pressed
+        moving = False
         
-        # Keep ship on screen
-        # Horizontal boundaries
+        # Apply thrust based on key presses with improved control
+        if keys[pygame.K_LEFT]:
+            self.velocity_x -= self.thrust * movement_speed * 0.5
+            self.rotation = min(self.rotation + self.rotation_speed, 20)
+            moving = True
+        if keys[pygame.K_RIGHT]:
+            self.velocity_x += self.thrust * movement_speed * 0.5
+            self.rotation = max(self.rotation - self.rotation_speed, -20)
+            moving = True
+        if keys[pygame.K_UP]:
+            self.velocity_y -= self.thrust * movement_speed * 0.5
+            moving = True
+        if keys[pygame.K_DOWN]:
+            self.velocity_y += self.thrust * movement_speed * 0.5
+            moving = True
+        
+        # Apply stronger deceleration when no movement keys are pressed
+        if not moving:
+            self.velocity_x *= self.deceleration
+            self.velocity_y *= self.deceleration
+            if abs(self.velocity_x) < 0.1: self.velocity_x = 0
+            if abs(self.velocity_y) < 0.1: self.velocity_y = 0
+        
+        # Reset rotation when not turning
+        if not (keys[pygame.K_LEFT] or keys[pygame.K_RIGHT]):
+            self.rotation = self.rotation * 0.8  # Faster rotation reset
+        
+        # Apply friction
+        self.velocity_x *= self.friction
+        self.velocity_y *= self.friction
+        
+        # Limit maximum velocity
+        velocity_magnitude = math.sqrt(self.velocity_x**2 + self.velocity_y**2)
+        if velocity_magnitude > self.max_velocity:
+            scale = self.max_velocity / velocity_magnitude
+            self.velocity_x *= scale
+            self.velocity_y *= scale
+        
+        # Update position
+        self.rect.x += self.velocity_x
+        self.rect.y += self.velocity_y
+        
+        # Keep ship on screen with bounce effect
         if self.rect.left < 0:
             self.rect.left = 0
+            self.velocity_x = abs(self.velocity_x) * 0.2  # Reduced bounce
         if self.rect.right > WIDTH:
             self.rect.right = WIDTH
+            self.velocity_x = -abs(self.velocity_x) * 0.2  # Reduced bounce
             
-        # Vertical boundaries
         if self.rect.top < self.min_y:
             self.rect.top = self.min_y
+            self.velocity_y = abs(self.velocity_y) * 0.2  # Reduced bounce
         if self.rect.bottom > self.max_y:
             self.rect.bottom = self.max_y
+            self.velocity_y = -abs(self.velocity_y) * 0.2  # Reduced bounce
             
         # Check power-up duration
         now = pygame.time.get_ticks()
@@ -425,7 +897,14 @@ class Ship(pygame.sprite.Sprite):
             self.power_ups.clear()
             self.shoot_delay = self.base_shoot_delay
             self.speed = self.base_speed
-    
+        
+        # Maintain invincibility for special name
+        if self.player_name == "12345":
+            self.is_invincible = True
+        
+        # Rest of the update code...
+        super().update()
+
     def add_power_up(self, power_up_type):
         self.power_ups.add(power_up_type)
         self.power_up_start = pygame.time.get_ticks()
@@ -554,104 +1033,113 @@ class Bullet(pygame.sprite.Sprite):
         if self.rect.bottom < 0 or self.rect.top > HEIGHT:
             self.kill()
 
-# Asteroid class
-class Asteroid(pygame.sprite.Sprite):
-    def __init__(self, level=1):
-        super().__init__()
-        # Create asteroid as a polygon
-        size = random.randint(20, 50)
-        self.image = pygame.Surface((size, size), pygame.SRCALPHA)
-        
-        # Generate random polygon points for the asteroid
-        points = []
-        for i in range(8):  # 8-sided polygon
-            angle = 2 * math.pi * i / 8
-            radius = random.uniform(size/3, size/2)
-            x = size/2 + radius * math.cos(angle)
-            y = size/2 + radius * math.sin(angle)
-            points.append((x, y))
-        
-        # Draw the asteroid with color based on level
-        if level <= 3:
-            color = BROWN
-        elif level <= 6:
-            color = ORANGE
-        elif level <= 9:
-            color = PURPLE
-        else:
-            color = RED
-            
-        pygame.draw.polygon(self.image, color, points)
-        
-        self.rect = self.image.get_rect()
-        self.rect.x = random.randrange(WIDTH - self.rect.width)
-        self.rect.y = random.randrange(-100, -40)
-        
-        # Base speed increased by 25% per level
-        base_speed = random.randrange(1, 4)
-        level_multiplier = 1 + (0.25 * (level - 1))
-        self.speedy = base_speed * level_multiplier
-        self.speedx = random.randrange(-2, 2) * level_multiplier
-
-    def update(self):
-        self.rect.y += self.speedy
-        self.rect.x += self.speedx
-        # If asteroid goes off screen, respawn it
-        if self.rect.top > HEIGHT + 10 or self.rect.left < -25 or self.rect.right > WIDTH + 25:
-            self.rect.x = random.randrange(WIDTH - self.rect.width)
-            self.rect.y = random.randrange(-100, -40)
-            self.speedy = random.randrange(1, 4)
-            self.speedx = random.randrange(-2, 2)
-
 # Boss class
 class Boss(pygame.sprite.Sprite):
     def __init__(self, level):
         super().__init__()
-        self.boss_level = level // 5  # 1 for level 5, 2 for level 10, etc.
+        self.boss_level = level // 5  # Regular boss level calculation
         
-        # Special handling for level 50 boss
-        self.is_omega_boss = level == 50
+        # Check if this is a mega-boss (every 50 levels)
+        self.is_mega_boss = level % 50 == 0
+        self.mega_boss_tier = level // 50  # 1 for level 50, 2 for level 100, etc.
         
-        # Size scales with level, but Omega Boss is massive
-        self.size = 400 if self.is_omega_boss else 180 + (self.boss_level * 20)
+        # Size scales with level, mega-bosses are even larger
+        if self.is_mega_boss:
+            self.size = 400 + (self.mega_boss_tier * 50)  # Bigger for each tier
+        else:
+            self.size = 180 + (self.boss_level * 20)
+        
         self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
         
-        if self.is_omega_boss:  # Level 50 - "THE OMEGA BOSS"
-            # Create a massive, intimidating boss
-            # Main core - pulsing dark matter core
-            core_color = (100, 0, 150)  # Dark purple
+        # Set health based on boss type
+        if self.is_mega_boss:
+            if level == 50:  # Omega Boss has exactly 5000 health
+                self.max_health = 5000
+            else:
+                # Scale mega-boss health exponentially for higher levels
+                base_health = 5000
+                level_multiplier = (self.mega_boss_tier - 1) * 2  # Double health every 50 levels
+                self.max_health = base_health * (2 ** level_multiplier)
+        else:
+            # Regular boss health scales linearly
+            self.max_health = 800 * self.boss_level
+        
+        self.health = self.max_health
+        
+        # Initialize movement pattern variables
+        self.movement_pattern = 0
+        self.movement_timer = pygame.time.get_ticks()
+        self.movement_duration = 3000  # Switch movement every 3 seconds
+        self.original_x = WIDTH // 2
+        self.original_y = HEIGHT // 4
+        self.target_x = self.original_x
+        self.target_y = self.original_y
+        self.move_speed = 2
+        
+        # Initialize boss position at the top of the screen
+        self.rect = self.image.get_rect()
+        self.rect.centerx = WIDTH // 2
+        self.rect.top = -self.size  # Start above the screen
+        
+        # Initialize shooting variables
+        self.shoot_delay = 300 if self.is_mega_boss else max(300, 1500 - (self.boss_level * 100))
+        self.last_shot = pygame.time.get_ticks()
+        self.pattern_time = pygame.time.get_ticks()
+        self.pattern_duration = 2000 if self.is_mega_boss else 3000
+        self.current_pattern = 0
+        self.movement_offset = 0
+        
+        # Draw boss appearance based on type
+        if self.is_mega_boss:  # Mega-boss design
+            # Core color gets more intense with level
+            core_hue = (self.mega_boss_tier * 30) % 360
+            core_color = pygame.Color(0)
+            core_color.hsva = (core_hue, 100, 100, 100)
+            
+            # Draw core
             pygame.draw.circle(self.image, core_color, (self.size//2, self.size//2), self.size//3)
             
-            # Multiple rotating rings
-            for i in range(5):
-                radius = self.size//3 + i * 30
-                color = (255, i * 50, 255 - i * 30)  # Color gradient
-                pygame.draw.circle(self.image, color, (self.size//2, self.size//2), radius, 4)
+            # Draw rotating rings with color based on level
+            ring_count = min(3 + self.mega_boss_tier, 8)  # More rings at higher levels
+            for i in range(ring_count):
+                radius = self.size//3 + i * (self.size//8)
+                ring_hue = (core_hue + i * 30) % 360
+                ring_color = pygame.Color(0)
+                ring_color.hsva = (ring_hue, 100, 100, 100)
+                pygame.draw.circle(self.image, ring_color, (self.size//2, self.size//2), radius, 4)
             
-            # Energy crystals at cardinal points
-            crystal_positions = [(self.size//2, 0), (self.size, self.size//2),
-                               (self.size//2, self.size), (0, self.size//2)]
-            for pos in crystal_positions:
-                crystal_color = (255, 0, 100)  # Bright pink
+            # Add energy crystals that increase with level
+            crystal_count = min(4 + self.mega_boss_tier, 8)
+            for i in range(crystal_count):
+                angle = 2 * math.pi * i / crystal_count
+                x = self.size//2 + math.cos(angle) * (self.size//2 - 40)
+                y = self.size//2 + math.sin(angle) * (self.size//2 - 40)
+                crystal_color = pygame.Color(0)
+                crystal_color.hsva = ((core_hue + 180) % 360, 100, 100, 100)
+                
+                # Draw crystal
                 points = []
-                for j in range(3):  # Triangle crystals
-                    angle = 2 * math.pi * j / 3
+                for j in range(3):
+                    crystal_angle = angle + 2 * math.pi * j / 3
                     points.append((
-                        pos[0] + math.cos(angle) * 40,
-                        pos[1] + math.sin(angle) * 40
+                        x + math.cos(crystal_angle) * 40,
+                        y + math.sin(crystal_angle) * 40
                     ))
                 pygame.draw.polygon(self.image, crystal_color, points)
             
-            # Add glowing eyes
-            eye_color = (255, 0, 0)  # Bright red
-            eye_size = 30
+            # Add glowing eyes that get more intense with level
+            eye_size = 30 + self.mega_boss_tier * 5
+            eye_color = pygame.Color(0)
+            eye_color.hsva = ((core_hue + 120) % 360, 100, 100, 100)
             pygame.draw.circle(self.image, eye_color, (self.size//3, self.size//3), eye_size)
             pygame.draw.circle(self.image, eye_color, (2*self.size//3, self.size//3), eye_size)
             
-            # Add energy beams
-            beam_color = (255, 255, 0)  # Yellow
-            for i in range(8):
-                angle = 2 * math.pi * i / 8
+            # Add energy beams that increase with level
+            beam_count = min(8 + self.mega_boss_tier * 2, 16)
+            beam_color = pygame.Color(0)
+            beam_color.hsva = ((core_hue + 60) % 360, 100, 100, 100)
+            for i in range(beam_count):
+                angle = 2 * math.pi * i / beam_count
                 start = (self.size//2, self.size//2)
                 end = (
                     self.size//2 + math.cos(angle) * self.size//2,
@@ -659,252 +1147,240 @@ class Boss(pygame.sprite.Sprite):
                 )
                 pygame.draw.line(self.image, beam_color, start, end, 6)
         
-        elif self.boss_level == 1:  # Level 5 boss - "The Crimson Titan"
-            # Draw large red pentagon with glowing core
-            points = []
-            for i in range(5):
-                angle = 2 * math.pi * i / 5 - math.pi / 2
-                points.append((
-                    self.size/2 + math.cos(angle) * self.size/2,
-                    self.size/2 + math.sin(angle) * self.size/2
-                ))
-            pygame.draw.polygon(self.image, RED, points)
-            # Draw core
-            pygame.draw.circle(self.image, ORANGE, (self.size//2, self.size//2), self.size//4)
-            
-        elif self.boss_level == 2:  # Level 10 boss - "The Void Reaper"
-            # Draw dark purple crystal-like shape
-            points = []
-            for i in range(8):
-                angle = 2 * math.pi * i / 8
-                r = self.size/2 if i % 2 == 0 else self.size/3
-                points.append((
-                    self.size/2 + math.cos(angle) * r,
-                    self.size/2 + math.sin(angle) * r
-                ))
-            pygame.draw.polygon(self.image, PURPLE, points)
-            # Add glowing eyes
-            eye_color = (255, 0, 255)  # Bright purple
-            pygame.draw.circle(self.image, eye_color, (self.size//3, self.size//3), 15)
-            pygame.draw.circle(self.image, eye_color, (2*self.size//3, self.size//3), 15)
-            
-        elif self.boss_level == 3:  # Level 15 boss - "The Omega Destroyer"
-            # Draw massive technological horror
-            # Main body
-            pygame.draw.rect(self.image, RED, (self.size//4, self.size//4, self.size//2, self.size//2))
-            # Outer ring
-            pygame.draw.circle(self.image, ORANGE, (self.size//2, self.size//2), self.size//2, 5)
-            # Energy nodes
-            for i in range(4):
-                angle = 2 * math.pi * i / 4
-                x = self.size//2 + math.cos(angle) * self.size//3
-                y = self.size//2 + math.sin(angle) * self.size//3
-                pygame.draw.circle(self.image, YELLOW, (int(x), int(y)), 20)
-                
-        elif self.boss_level == 4:  # Level 20 boss - "The Quantum Harbinger"
-            # Draw quantum-themed boss with multiple layers
-            # Outer quantum field
-            pygame.draw.circle(self.image, (0, 255, 255), (self.size//2, self.size//2), self.size//2)
-            # Inner rings
-            for i in range(3):
-                radius = self.size//2 - (i * 20)
-                pygame.draw.circle(self.image, (0, 150, 255), (self.size//2, self.size//2), radius, 3)
-            # Energy beams
-            for i in range(6):
-                angle = 2 * math.pi * i / 6
-                start = (self.size//2, self.size//2)
-                end = (
-                    self.size//2 + math.cos(angle) * self.size//2,
-                    self.size//2 + math.sin(angle) * self.size//2
-                )
-                pygame.draw.line(self.image, (0, 255, 255), start, end, 4)
-                
-        else:  # Level 25+ boss - "The Cosmic Overlord"
-            # Draw an even more intimidating boss
-            # Main core
-            pygame.draw.circle(self.image, (255, 0, 0), (self.size//2, self.size//2), self.size//2)
-            # Pulsing rings
-            for i in range(4):
-                radius = self.size//2 - (i * 15)
-                pygame.draw.circle(self.image, (255, i * 60, 0), (self.size//2, self.size//2), radius, 5)
-            # Energy crystals
-            for i in range(8):
-                angle = 2 * math.pi * i / 8
-                distance = self.size//3
-                x = self.size//2 + math.cos(angle) * distance
-                y = self.size//2 + math.sin(angle) * distance
-                # Draw diamond-shaped crystals
+        else:  # Regular boss designs
+            if self.boss_level == 1:  # Level 5 boss
+                # Draw large red pentagon with glowing core
                 points = []
-                for j in range(4):
-                    crystal_angle = 2 * math.pi * j / 4 + angle
+                for i in range(5):
+                    angle = 2 * math.pi * i / 5 - math.pi / 2
                     points.append((
-                        x + math.cos(crystal_angle) * 15,
-                        y + math.sin(crystal_angle) * 15
+                        self.size/2 + math.cos(angle) * self.size/2,
+                        self.size/2 + math.sin(angle) * self.size/2
                     ))
-                pygame.draw.polygon(self.image, (255, 255, 0), points)
-        
-        self.rect = self.image.get_rect()
-        self.rect.centerx = WIDTH // 2
-        self.rect.top = -self.size
-        
-        # Boss attributes scaled by level
-        self.max_health = 800 * self.boss_level  # Reduced base health for more frequent bosses
-        self.health = self.max_health
-        self.speed = 2 + self.boss_level
-        self.shoot_delay = max(100, 400 - (self.boss_level * 40))  # Faster shooting at higher levels
-        self.last_shot = pygame.time.get_ticks()
-        self.pattern_time = pygame.time.get_ticks()
-        self.pattern_duration = 3000  # Switch patterns every 3 seconds
-        self.current_pattern = 0
-        self.movement_offset = 0
-        
+                pygame.draw.polygon(self.image, RED, points)
+                pygame.draw.circle(self.image, ORANGE, (self.size//2, self.size//2), self.size//4)
+            
+            elif self.boss_level == 2:  # Level 10 boss
+                # Draw dark purple crystal-like shape
+                points = []
+                for i in range(8):
+                    angle = 2 * math.pi * i / 8
+                    r = self.size/2 if i % 2 == 0 else self.size/3
+                    points.append((
+                        self.size/2 + math.cos(angle) * r,
+                        self.size/2 + math.sin(angle) * r
+                    ))
+                pygame.draw.polygon(self.image, PURPLE, points)
+                pygame.draw.circle(self.image, (255, 0, 255), (self.size//3, self.size//3), 15)
+                pygame.draw.circle(self.image, (255, 0, 255), (2*self.size//3, self.size//3), 15)
+            
+            else:  # Higher level regular bosses
+                # Draw a more intimidating boss with level-based colors
+                hue = (self.boss_level * 30) % 360
+                main_color = pygame.Color(0)
+                main_color.hsva = (hue, 100, 100, 100)
+                
+                # Main core
+                pygame.draw.circle(self.image, main_color, (self.size//2, self.size//2), self.size//2)
+                
+                # Pulsing rings with complementary colors
+                for i in range(4):
+                    radius = self.size//2 - (i * 15)
+                    ring_color = pygame.Color(0)
+                    ring_color.hsva = ((hue + i * 30) % 360, 100, 100, 100)
+                    pygame.draw.circle(self.image, ring_color, (self.size//2, self.size//2), radius, 5)
+
     def update(self):
-        now = pygame.time.get_ticks()
-        
-        # Move into screen at start
-        if self.rect.top < 50:
+        # Boss entrance movement
+        if self.rect.top < 50:  # Initial descent
             self.rect.y += 2
             return
         
-        # Special patterns for Omega Boss
-        if self.is_omega_boss:
-            # Switch patterns more frequently
-            if now - self.pattern_time > 2000:  # Every 2 seconds
-                self.pattern_time = now
-                self.current_pattern = (self.current_pattern + 1) % 4
-                self.movement_offset = 0
-            
-            # More complex movement patterns
-            if self.current_pattern == 0:  # Double sine wave
-                self.movement_offset += 0.08
-                self.rect.centerx = WIDTH//2 + math.sin(self.movement_offset) * (WIDTH//3)
-                self.rect.centery = HEIGHT//4 + math.sin(2 * self.movement_offset) * (HEIGHT//6)
-            elif self.current_pattern == 1:  # Infinity pattern
-                self.movement_offset += 0.05
-                scale_x = WIDTH//3
-                scale_y = HEIGHT//6
-                self.rect.centerx = WIDTH//2 + math.sin(2 * self.movement_offset) * scale_x
-                self.rect.centery = HEIGHT//4 + math.sin(self.movement_offset) * scale_y
-            elif self.current_pattern == 2:  # Diamond pattern
-                self.movement_offset += 0.04
-                angle = self.movement_offset % (2 * math.pi)
-                radius = 200
-                self.rect.centerx = WIDTH//2 + math.cos(angle) * radius
-                self.rect.centery = HEIGHT//4 + math.sin(angle) * radius
-            else:  # Aggressive teleport
-                if random.random() < 0.05:  # 5% chance to teleport each frame
-                    self.rect.centerx = random.randint(self.size//2, WIDTH - self.size//2)
-                    self.rect.centery = random.randint(50, HEIGHT//3)
-        else:
-            # Regular boss patterns
-            # Switch patterns periodically
-            if now - self.pattern_time > self.pattern_duration:
-                self.pattern_time = now
-                self.current_pattern = (self.current_pattern + 1) % 3
-                self.movement_offset = 0
-            
-            # Movement patterns
-            if self.current_pattern == 0:  # Sine wave
-                self.movement_offset += 0.05
-                self.rect.centerx = WIDTH//2 + math.sin(self.movement_offset) * (WIDTH//3)
-            elif self.current_pattern == 1:  # Figure 8
-                self.movement_offset += 0.03
-                scale = 100
-                self.rect.centerx = WIDTH//2 + math.sin(2 * self.movement_offset) * scale
-                self.rect.centery = 150 + math.sin(self.movement_offset) * scale
-            else:  # Random teleports
-                if random.random() < 0.02:  # 2% chance to teleport each frame
-                    self.rect.centerx = random.randint(self.size//2, WIDTH - self.size//2)
-                    self.rect.centery = random.randint(50, HEIGHT//3)
+        now = pygame.time.get_ticks()
         
-        # Keep boss on screen
-        if self.rect.left < 0:
-            self.rect.left = 0
-        if self.rect.right > WIDTH:
-            self.rect.right = WIDTH
-        if self.rect.top < 0:
-            self.rect.top = 0
-        if self.rect.bottom > HEIGHT//2:
-            self.rect.bottom = HEIGHT//2
-    
-    def shoot(self, player=None):  # Add player parameter
+        # Switch movement patterns periodically
+        if now - self.movement_timer > self.movement_duration:
+            self.movement_pattern = (self.movement_pattern + 1) % 4
+            self.movement_timer = now
+            self.movement_offset = 0
+        
+        # Different movement patterns
+        if self.is_mega_boss:
+            if self.mega_boss_tier == 1:  # Omega Boss
+                if self.movement_pattern == 0:  # Figure-8 pattern
+                    self.movement_offset += 0.02
+                    self.rect.centerx = self.original_x + math.sin(self.movement_offset * 2) * 200
+                    self.rect.centery = self.original_y + math.sin(self.movement_offset) * 100
+                
+                elif self.movement_pattern == 1:  # Circle pattern
+                    self.movement_offset += 0.03
+                    radius = 150
+                    self.rect.centerx = self.original_x + math.cos(self.movement_offset) * radius
+                    self.rect.centery = self.original_y + math.sin(self.movement_offset) * radius
+                
+                elif self.movement_pattern == 2:  # Dash pattern
+                    if self.movement_offset == 0:
+                        self.target_x = random.randint(100, WIDTH - 100)
+                        self.target_y = random.randint(100, HEIGHT//2)
+                    
+                    dx = self.target_x - self.rect.centerx
+                    dy = self.target_y - self.rect.centery
+                    dist = math.sqrt(dx * dx + dy * dy)
+                    
+                    if dist > 5:
+                        self.rect.centerx += dx / dist * 5
+                        self.rect.centery += dy / dist * 5
+                    self.movement_offset += 0.1
+                
+                else:  # Zigzag pattern
+                    self.movement_offset += 0.05
+                    self.rect.centerx = self.original_x + math.sin(self.movement_offset * 4) * 200
+                    self.rect.centery = self.original_y + math.sin(self.movement_offset * 2) * 50
+        
+        else:  # Regular boss movements
+            if self.movement_pattern == 0:  # Side to side
+                self.rect.centerx = self.original_x + math.sin(self.movement_offset) * 150
+                self.movement_offset += 0.03
+            
+            elif self.movement_pattern == 1:  # Small circles
+                radius = 75
+                self.rect.centerx = self.original_x + math.cos(self.movement_offset) * radius
+                self.rect.centery = self.original_y + math.sin(self.movement_offset) * radius
+                self.movement_offset += 0.04
+            
+            elif self.movement_pattern == 2:  # Random position
+                if self.movement_offset == 0:
+                    self.target_x = random.randint(100, WIDTH - 100)
+                    self.target_y = random.randint(100, HEIGHT//3)
+                
+                dx = self.target_x - self.rect.centerx
+                dy = self.target_y - self.rect.centery
+                dist = math.sqrt(dx * dx + dy * dy)
+                
+                if dist > 5:
+                    self.rect.centerx += dx / dist * 3
+                    self.rect.centery += dy / dist * 3
+                self.movement_offset += 0.1
+            
+            else:  # Up and down
+                self.rect.centery = self.original_y + math.sin(self.movement_offset) * 50
+                self.movement_offset += 0.02
+        
+        # Keep boss within screen bounds
+        self.rect.clamp_ip(pygame.Rect(0, 50, WIDTH, HEIGHT//2))
+
+    def shoot(self, player=None):
         now = pygame.time.get_ticks()
         if now - self.last_shot > self.shoot_delay:
             self.last_shot = now
             bullets = []
             
-            if self.is_omega_boss:
-                # Multiple attack patterns
-                pattern = (now // 2000) % 4  # Change pattern every 2 seconds
+            if self.is_mega_boss:
+                # Check if enough time has passed to switch patterns
+                if now - self.pattern_time > self.pattern_duration:
+                    self.current_pattern = (self.current_pattern + 1) % 4
+                    self.pattern_time = now
                 
-                if pattern == 0:  # Spiral barrage
-                    for i in range(16):
-                        angle = 2 * math.pi * i / 16 + self.movement_offset
-                        speed = 7
-                        speed_x = math.cos(angle) * speed
-                        speed_y = math.sin(angle) * speed
-                        bullet = BossBullet(self.rect.centerx, self.rect.centery, 
-                                          speed_x, speed_y, (255, 0, 0))
-                        bullets.append(bullet)
-                
-                elif pattern == 1:  # Cross beam
-                    speeds = [(8, 0), (-8, 0), (0, 8), (0, -8),
-                             (5.6, 5.6), (-5.6, 5.6), (5.6, -5.6), (-5.6, -5.6)]
-                    for speed_x, speed_y in speeds:
-                        bullet = BossBullet(self.rect.centerx, self.rect.centery,
-                                          speed_x, speed_y, (255, 255, 0))
-                        bullets.append(bullet)
-                
-                elif pattern == 2:  # Homing missiles
-                    if player:  # Only create homing missiles if player reference exists
-                        for _ in range(4):
-                            # Target player's position
-                            dx = player.rect.centerx - self.rect.centerx
-                            dy = player.rect.centery - self.rect.centery
-                            dist = math.sqrt(dx * dx + dy * dy)
-                            if dist > 0:  # Prevent division by zero
-                                speed = 6
-                                speed_x = dx / dist * speed
-                                speed_y = dy / dist * speed
+                if self.mega_boss_tier == 1:  # Level 50 - Omega Boss
+                    if self.current_pattern == 0:  # Spiral pattern
+                        for i in range(8):
+                            angle = 2 * math.pi * i / 8 + self.movement_offset
+                            speed = 8
+                            speed_x = math.cos(angle) * speed
+                            speed_y = math.sin(angle) * speed
+                            bullet = BossBullet(self.rect.centerx, self.rect.centery, 
+                                              speed_x, speed_y, (255, 0, 0))  # Red bullets
+                            bullets.append(bullet)
+                        self.movement_offset += 0.2  # Rotate the pattern
+                    
+                    elif self.current_pattern == 1:  # Cross beam pattern
+                        angles = [0, math.pi/2, math.pi, 3*math.pi/2]
+                        for angle in angles:
+                            for speed in range(4, 12, 2):  # Multiple bullets along each beam
+                                speed_x = math.cos(angle) * speed
+                                speed_y = math.sin(angle) * speed
                                 bullet = BossBullet(self.rect.centerx, self.rect.centery,
-                                                  speed_x, speed_y, (0, 255, 255))
+                                                  speed_x, speed_y, (255, 0, 255))  # Purple bullets
                                 bullets.append(bullet)
+                    
+                    elif self.current_pattern == 2:  # Homing missiles
+                        if player:
+                            for i in range(3):  # Launch 3 homing missiles
+                                dx = player.rect.centerx - self.rect.centerx
+                                dy = player.rect.centery - self.rect.centery
+                                dist = math.sqrt(dx * dx + dy * dy)
+                                if dist > 0:
+                                    speed = 6
+                                    speed_x = dx / dist * speed
+                                    speed_y = dy / dist * speed
+                                    # Add slight spread to the missiles
+                                    spread = (i - 1) * math.pi / 6
+                                    new_speed_x = speed_x * math.cos(spread) - speed_y * math.sin(spread)
+                                    new_speed_y = speed_x * math.sin(spread) + speed_y * math.cos(spread)
+                                    bullet = BossBullet(self.rect.centerx, self.rect.centery,
+                                                      new_speed_x, new_speed_y, (0, 255, 255))  # Cyan bullets
+                                    bullets.append(bullet)
+                    
+                    else:  # Scatter shot
+                        for _ in range(12):
+                            angle = random.uniform(0, 2 * math.pi)
+                            speed = random.uniform(3, 8)
+                            speed_x = math.cos(angle) * speed
+                            speed_y = math.sin(angle) * speed
+                            bullet = BossBullet(self.rect.centerx, self.rect.centery,
+                                              speed_x, speed_y, (255, 255, 0))  # Yellow bullets
+                            bullets.append(bullet)
                 
-                else:  # Random scatter shot
-                    for _ in range(20):
-                        angle = random.uniform(0, 2 * math.pi)
-                        speed = random.uniform(4, 10)
+                # ... rest of mega-boss patterns ...
+            
+            else:  # Regular boss patterns
+                if self.current_pattern == 0:  # Basic spread shot
+                    for i in range(-2, 3):
+                        angle = math.pi/6 * i
+                        speed = 6
+                        speed_x = math.sin(angle) * speed
+                        speed_y = math.cos(angle) * speed
+                        bullet = BossBullet(self.rect.centerx, self.rect.centery,
+                                          speed_x, speed_y, RED)
+                        bullets.append(bullet)
+                
+                elif self.current_pattern == 1:  # Circle shot
+                    for i in range(8):
+                        angle = 2 * math.pi * i / 8
+                        speed = 5
                         speed_x = math.cos(angle) * speed
                         speed_y = math.sin(angle) * speed
                         bullet = BossBullet(self.rect.centerx, self.rect.centery,
-                                          speed_x, speed_y, (255, 0, 255))
-                        bullets.append(bullet)
-            else:
-                # Regular boss patterns
-                if self.boss_level == 1:  # Pentagram shot pattern
-                    for i in range(5):
-                        angle = 2 * math.pi * i / 5 + self.movement_offset
-                        speed_x = math.cos(angle) * 5
-                        speed_y = math.sin(angle) * 5
-                        bullet = BossBullet(self.rect.centerx, self.rect.centery, speed_x, speed_y, RED)
+                                          speed_x, speed_y, PURPLE)
                         bullets.append(bullet)
                 
-                elif self.boss_level == 2:  # Spiral pattern
-                    for i in range(8):
-                        angle = 2 * math.pi * i / 8 + self.movement_offset
-                        speed_x = math.cos(angle) * 6
-                        speed_y = math.sin(angle) * 6
-                        bullet = BossBullet(self.rect.centerx, self.rect.centery, speed_x, speed_y, PURPLE)
-                        bullets.append(bullet)
+                elif self.current_pattern == 2:  # Aimed shot
+                    if player:
+                        dx = player.rect.centerx - self.rect.centerx
+                        dy = player.rect.centery - self.rect.centery
+                        dist = math.sqrt(dx * dx + dy * dy)
+                        if dist > 0:
+                            speed = 7
+                            speed_x = dx / dist * speed
+                            speed_y = dy / dist * speed
+                            bullet = BossBullet(self.rect.centerx, self.rect.centery,
+                                              speed_x, speed_y, ORANGE)
+                            bullets.append(bullet)
                 
-                else:  # Chaos pattern
-                    for _ in range(12):
-                        angle = random.uniform(0, 2 * math.pi)
-                        speed = random.uniform(3, 8)
+                else:  # Random spray
+                    for _ in range(5):
+                        angle = random.uniform(math.pi/4, 3*math.pi/4)
+                        speed = random.uniform(4, 7)
                         speed_x = math.cos(angle) * speed
                         speed_y = math.sin(angle) * speed
-                        bullet = BossBullet(self.rect.centerx, self.rect.centery, speed_x, speed_y, ORANGE)
+                        bullet = BossBullet(self.rect.centerx, self.rect.centery,
+                                          speed_x, speed_y, RED)
                         bullets.append(bullet)
+                
+                # Switch patterns periodically
+                if now - self.pattern_time > self.pattern_duration:
+                    self.current_pattern = (self.current_pattern + 1) % 4
+                    self.pattern_time = now
             
             return bullets
         return []
@@ -930,17 +1406,21 @@ class BossBullet(pygame.sprite.Sprite):
             self.kill()
 
 # Function to get player name
+PLAYER_NAME = None  # Global variable to store player name
+
 def get_player_name():
+    global PLAYER_NAME
+    if PLAYER_NAME:  # If we already have a name, return it
+        return PLAYER_NAME
+        
     font = pygame.font.Font(None, 36)
-    input_box = pygame.Rect(WIDTH // 2 - 200, HEIGHT // 2, 400, 50)
+    input_box = pygame.Rect(WIDTH//2 - 100, HEIGHT//2, 200, 32)
     color_inactive = pygame.Color('lightskyblue3')
     color_active = pygame.Color('dodgerblue2')
     color = color_inactive
     active = False
     text = ''
     done = False
-    
-    title = font.render("Enter Your Name:", True, WHITE)
     
     while not done:
         for event in pygame.event.get():
@@ -952,33 +1432,23 @@ def get_player_name():
                 color = color_active if active else color_inactive
             if event.type == pygame.KEYDOWN:
                 if active:
-                    if event.key == pygame.K_RETURN:
-                        done = True
+                    if event.key == pygame.K_RETURN and text.strip():
+                        PLAYER_NAME = text  # Store the name globally
+                        return text
                     elif event.key == pygame.K_BACKSPACE:
                         text = text[:-1]
                     else:
-                        # Limit name length to 15 characters
-                        if len(text) < 15:
-                            text += event.unicode
+                        text += event.unicode
         
         screen.fill(BLACK)
-        screen.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 2 - 80))
-        
-        # Render the current text
-        txt_surface = font.render(text, True, color)
-        # Resize the box if the text is too long
-        width = max(400, txt_surface.get_width() + 10)
+        txt_surface = font.render("Enter your name:", True, WHITE)
+        width = max(200, txt_surface.get_width()+10)
         input_box.w = width
-        input_box.centerx = WIDTH // 2
-        
-        # Blit the text
-        screen.blit(txt_surface, (input_box.x + 5, input_box.y + 5))
-        # Blit the input_box rect
+        screen.blit(txt_surface, (WIDTH//2 - txt_surface.get_width()//2, HEIGHT//2 - 50))
+        txt_surface = font.render(text, True, color)
+        screen.blit(txt_surface, (input_box.x+5, input_box.y+5))
         pygame.draw.rect(screen, color, input_box, 2)
-        
         pygame.display.flip()
-    
-    return text if text else "Anonymous"
 
 # Function to load high scores
 def load_high_scores():
@@ -1058,28 +1528,136 @@ def display_high_scores(high_scores):
 
 # Ship selection screen
 def select_ship():
-    # Create ship options as polygons instead of images
-    ship1 = pygame.Surface((50, 50), pygame.SRCALPHA)
-    pygame.draw.polygon(ship1, BLUE, [(25, 0), (0, 50), (50, 50)])
-    
-    ship2 = pygame.Surface((50, 50), pygame.SRCALPHA)
-    pygame.draw.polygon(ship2, GREEN, [(25, 0), (0, 50), (25, 35), (50, 50)])
-    
-    ship3 = pygame.Surface((50, 50), pygame.SRCALPHA)
-    pygame.draw.polygon(ship3, RED, [(25, 0), (10, 30), (0, 50), (50, 50), (40, 30)])
-    ships = [(ship1, 5), (ship2, 7), (ship3, 3)]  # (image, speed)
+    # Create detailed ship designs
+    def create_fighter_ship():
+        ship = pygame.Surface((60, 60), pygame.SRCALPHA)
+        # Main body
+        pygame.draw.polygon(ship, (100, 100, 255), [
+            (30, 0),   # Nose
+            (40, 20),  # Right hull
+            (45, 40),  # Right wing
+            (35, 45),  # Right engine
+            (25, 45),  # Left engine
+            (15, 40),  # Left wing
+            (20, 20)   # Left hull
+        ])
+        # Cockpit
+        pygame.draw.polygon(ship, (200, 200, 255), [
+            (30, 10),  # Top
+            (35, 25),  # Right
+            (25, 25)   # Left
+        ])
+        # Engine glow
+        pygame.draw.circle(ship, (255, 165, 0), (30, 45), 5)
+        pygame.draw.circle(ship, (255, 69, 0), (30, 45), 3)
+        return ship, 5  # Balanced speed
+
+    def create_interceptor_ship():
+        ship = pygame.Surface((60, 60), pygame.SRCALPHA)
+        # Main body
+        pygame.draw.polygon(ship, (100, 255, 100), [
+            (30, 0),   # Nose
+            (45, 30),  # Right hull
+            (40, 45),  # Right engine
+            (20, 45),  # Left engine
+            (15, 30)   # Left hull
+        ])
+        # Wings
+        pygame.draw.polygon(ship, (50, 200, 50), [
+            (45, 30),  # Right top
+            (55, 40),  # Right tip
+            (40, 45)   # Right bottom
+        ])
+        pygame.draw.polygon(ship, (50, 200, 50), [
+            (15, 30),  # Left top
+            (5, 40),   # Left tip
+            (20, 45)   # Left bottom
+        ])
+        # Cockpit
+        pygame.draw.ellipse(ship, (200, 255, 200), (25, 15, 10, 15))
+        # Engine glow
+        pygame.draw.circle(ship, (255, 165, 0), (30, 45), 6)
+        pygame.draw.circle(ship, (255, 69, 0), (30, 45), 4)
+        return ship, 7  # Fast speed
+
+    def create_assault_ship():
+        ship = pygame.Surface((60, 60), pygame.SRCALPHA)
+        # Main body
+        pygame.draw.polygon(ship, (255, 100, 100), [
+            (30, 0),   # Nose
+            (50, 25),  # Right hull
+            (45, 45),  # Right engine
+            (15, 45),  # Left engine
+            (10, 25)   # Left hull
+        ])
+        # Heavy armor plates
+        pygame.draw.polygon(ship, (200, 50, 50), [
+            (40, 15),  # Right top
+            (50, 25),  # Right middle
+            (45, 35)   # Right bottom
+        ])
+        pygame.draw.polygon(ship, (200, 50, 50), [
+            (20, 15),  # Left top
+            (10, 25),  # Left middle
+            (15, 35)   # Left bottom
+        ])
+        # Cockpit
+        pygame.draw.polygon(ship, (255, 200, 200), [
+            (30, 10),  # Top
+            (35, 20),  # Right
+            (25, 20)   # Left
+        ])
+        # Triple engine glow
+        pygame.draw.circle(ship, (255, 165, 0), (22, 45), 4)
+        pygame.draw.circle(ship, (255, 165, 0), (30, 45), 4)
+        pygame.draw.circle(ship, (255, 165, 0), (38, 45), 4)
+        pygame.draw.circle(ship, (255, 69, 0), (22, 45), 2)
+        pygame.draw.circle(ship, (255, 69, 0), (30, 45), 2)
+        pygame.draw.circle(ship, (255, 69, 0), (38, 45), 2)
+        return ship, 3  # Heavy but slow
+
+    ships = [
+        (create_fighter_ship(), "Fighter", "Balanced speed and maneuverability"),
+        (create_interceptor_ship(), "Interceptor", "Fast but fragile"),
+        (create_assault_ship(), "Assault", "Heavy armor, powerful weapons")
+    ]
     
     font = pygame.font.Font(None, 36)
     title = font.render("Select Your Ship", True, WHITE)
     
-    selected = None
+    clock = pygame.time.Clock()
+    running = True
     
-    while selected is None:
+    while running:
         screen.fill(BLACK)
         screen.blit(title, (WIDTH//2 - title.get_width()//2, 50))
         
+        # Handle events first
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return None
+                elif event.key in [pygame.K_1, pygame.K_2, pygame.K_3]:
+                    index = event.key - pygame.K_1
+                    if 0 <= index < len(ships):
+                        return ships[index][0]
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:  # Left click
+                    mouse_pos = pygame.mouse.get_pos()
+                    # Check each ship's click area
+                    for i, ((ship_img, speed), name, desc) in enumerate(ships):
+                        x = WIDTH // 4 * (i + 1)
+                        y = HEIGHT // 2
+                        # Create a larger click area
+                        click_rect = pygame.Rect(x - 70, y - 70, 140, 140)
+                        if click_rect.collidepoint(mouse_pos):
+                            return (ship_img, speed)
+        
         # Display ship options
-        for i, (ship_img, speed) in enumerate(ships):
+        for i, ((ship_img, speed), name, desc) in enumerate(ships):
             x = WIDTH // 4 * (i + 1)
             y = HEIGHT // 2
             
@@ -1088,350 +1666,343 @@ def select_ship():
             screen.blit(ship_img, ship_rect)
             
             # Draw ship info
+            name_text = font.render(name, True, WHITE)
             speed_text = font.render(f"Speed: {speed}", True, WHITE)
-            screen.blit(speed_text, (x - speed_text.get_width()//2, y + 60))
+            desc_text = font.render(desc, True, WHITE)
             
-            # Draw selection box
-            pygame.draw.rect(screen, WHITE, (x - 60, y - 60, 120, 120), 2)
+            screen.blit(name_text, (x - name_text.get_width()//2, y + 40))
+            screen.blit(speed_text, (x - speed_text.get_width()//2, y + 70))
+            screen.blit(desc_text, (x - desc_text.get_width()//2, y + 100))
             
-            # Check for mouse click
-            mouse_pos = pygame.mouse.get_pos()
-            if pygame.mouse.get_pressed()[0] and ship_rect.collidepoint(mouse_pos):
-                selected = ships[i]
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    pygame.quit()
-                    sys.exit()
-                # Number keys for quick selection
-                elif event.key in [pygame.K_1, pygame.K_2, pygame.K_3]:
-                    index = event.key - pygame.K_1
-                    if 0 <= index < len(ships):
-                        selected = ships[index]
+            # Draw selection box with engine glow effect
+            box_color = (100 + int(abs(math.sin(pygame.time.get_ticks() * 0.003)) * 155),
+                        100 + int(abs(math.sin(pygame.time.get_ticks() * 0.003)) * 155),
+                        255)
+            pygame.draw.rect(screen, box_color, (x - 70, y - 70, 140, 140), 2)
         
         pygame.display.flip()
+        clock.tick(60)
     
-    return selected
+    return None
 
 # Welcome screen function
 def welcome_screen():
+    global ESC_QUIT_GAME
+    
+    running = True
+    clock = pygame.time.Clock()
+    
+    while running:
+        screen.fill(BLACK)
+        
+        # Draw title with glow effect
+        title_font = pygame.font.Font(None, 74)
+        title = title_font.render("SPACE SHOOTER", True, WHITE)
+        # Create glow effect
+        glow_color = (100 + int(abs(math.sin(pygame.time.get_ticks() * 0.003)) * 155),
+                     100 + int(abs(math.sin(pygame.time.get_ticks() * 0.003)) * 155),
+                     255)
+        glow_title = title_font.render("SPACE SHOOTER", True, glow_color)
+        
+        # Draw glow and main title
+        screen.blit(glow_title, (WIDTH//2 - title.get_width()//2 + 2, HEIGHT//4 + 2))
+        screen.blit(title, (WIDTH//2 - title.get_width()//2, HEIGHT//4))
+        
+        # Draw player name
+        name_font = pygame.font.Font(None, 36)
+        name_text = name_font.render(f"Player: {PLAYER_NAME}", True, WHITE)
+        screen.blit(name_text, (WIDTH//2 - name_text.get_width()//2, HEIGHT//2))
+        
+        # Draw menu options with glow effect
+        menu_font = pygame.font.Font(None, 48)
+        options = [
+            ("Press SPACE to Play", pygame.K_SPACE),
+            ("Press S for Shop", pygame.K_s),
+            ("Press H for High Scores", pygame.K_h),
+            ("Press ESC to Quit", pygame.K_ESCAPE)
+        ]
+        
+        for i, (text, key) in enumerate(options):
+            text_surface = menu_font.render(text, True, WHITE)
+            y_pos = HEIGHT * 2//3 + i * 50
+            screen.blit(text_surface, (WIDTH//2 - text_surface.get_width()//2, y_pos))
+        
+        pygame.display.flip()
+        clock.tick(60)
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                ESC_QUIT_GAME = True
+                return
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    ESC_QUIT_GAME = True
+                    return
+                elif event.key == pygame.K_SPACE:
+                    # Start game flow
+                    ship_info = select_ship()
+                    if ship_info:
+                        game()
+                        # Don't return here, let the welcome screen continue
+                elif event.key == pygame.K_s:
+                    shop_screen()
+                elif event.key == pygame.K_h:
+                    high_scores = load_high_scores()
+                    display_high_scores(high_scores)
+
+def display_rating_screen():
     font_title = pygame.font.Font(None, 72)
     font = pygame.font.Font(None, 36)
+    small_font = pygame.font.Font(None, 24)
     
-    title = font_title.render("SPACE ASTEROID SHOOTER", True, YELLOW)
-    start_text = font.render("Press ENTER to Start", True, WHITE)
-    high_scores_text = font.render("Press H to View High Scores", True, WHITE)
-    quit_text = font.render("Press ESC to Quit", True, WHITE)
+    title = font_title.render("Rate The Game", True, YELLOW)
+    stars = 0  # Current rating
+    max_stars = 5
+    submitted = False
+    skip_levels = 0  # Number of levels to skip
+    choosing_levels = False  # Whether we're in level selection mode
     
-    # Create a simple animated asteroid for the welcome screen
-    asteroid_img = pygame.Surface((50, 50), pygame.SRCALPHA)
-    pygame.draw.circle(asteroid_img, BROWN, (25, 25), 20)
-    asteroid_rect = asteroid_img.get_rect(center=(WIDTH//2, 300))
-    asteroid_speed = [2, 1]
+    # Create star surfaces
+    empty_star = pygame.Surface((40, 40), pygame.SRCALPHA)
+    pygame.draw.polygon(empty_star, WHITE, [(20, 0), (25, 15), (40, 15), (28, 25),
+                                          (33, 40), (20, 30), (7, 40), (12, 25),
+                                          (0, 15), (15, 15)], 2)
+    
+    filled_star = pygame.Surface((40, 40), pygame.SRCALPHA)
+    pygame.draw.polygon(filled_star, YELLOW, [(20, 0), (25, 15), (40, 15), (28, 25),
+                                            (33, 40), (20, 30), (7, 40), (12, 25),
+                                            (0, 15), (15, 15)])
     
     clock = pygame.time.Clock()
     running = True
     
     while running:
         clock.tick(60)
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN:
-                    running = False
-                    game()
-                elif event.key == pygame.K_h:
-                    display_high_scores(load_high_scores())
-                elif event.key == pygame.K_ESCAPE:
-                    pygame.quit()
-                    sys.exit()
-        
-        # Move the asteroid
-        asteroid_rect.x += asteroid_speed[0]
-        asteroid_rect.y += asteroid_speed[1]
-        
-        # Bounce the asteroid off the edges
-        if asteroid_rect.left < 0 or asteroid_rect.right > WIDTH:
-            asteroid_speed[0] = -asteroid_speed[0]
-        if asteroid_rect.top < 0 or asteroid_rect.bottom > HEIGHT:
-            asteroid_speed[1] = -asteroid_speed[1]
-        
-        # Draw everything
         screen.fill(BLACK)
-        screen.blit(title, (WIDTH//2 - title.get_width()//2, 150))
-        screen.blit(start_text, (WIDTH//2 - start_text.get_width()//2, HEIGHT//2))
-        screen.blit(high_scores_text, (WIDTH//2 - high_scores_text.get_width()//2, HEIGHT//2 + 50))
-        screen.blit(quit_text, (WIDTH//2 - quit_text.get_width()//2, HEIGHT//2 + 100))
-        screen.blit(asteroid_img, asteroid_rect)
         
-        pygame.display.flip()
-
-def display_rating_screen():
-    font_title = pygame.font.Font(None, 48)
-    font = pygame.font.Font(None, 36)
-    
-    title = font_title.render("Rate Your Experience!", True, YELLOW)
-    instruction = font.render("Press 1-5 to rate the game", True, WHITE)
-    
-    # Draw stars
-    star_surface = pygame.Surface((50, 50), pygame.SRCALPHA)
-    pygame.draw.polygon(star_surface, YELLOW, [
-        (25, 0), (32, 18), (50, 18), (35, 30),
-        (42, 50), (25, 38), (8, 50), (15, 30),
-        (0, 18), (18, 18)
-    ])
-    
-    # Empty star (outline)
-    empty_star = pygame.Surface((50, 50), pygame.SRCALPHA)
-    pygame.draw.polygon(empty_star, WHITE, [
-        (25, 0), (32, 18), (50, 18), (35, 30),
-        (42, 50), (25, 38), (8, 50), (15, 30),
-        (0, 18), (18, 18)
-    ], 2)
-    
-    rating = None
-    while rating is None:
-        screen.fill(BLACK)
-        screen.blit(title, (WIDTH//2 - title.get_width()//2, HEIGHT//3))
-        screen.blit(instruction, (WIDTH//2 - instruction.get_width()//2, HEIGHT//3 + 50))
-        
-        # Draw stars
-        star_spacing = 60
-        total_width = star_spacing * 5
-        start_x = WIDTH//2 - total_width//2
-        
-        # Get mouse position for hover effect
         mouse_x, mouse_y = pygame.mouse.get_pos()
-        hover_rating = None
-        
-        for i in range(5):
-            star_x = start_x + i * star_spacing
-            star_rect = pygame.Rect(star_x, HEIGHT//2, 50, 50)
-            
-            # Check if mouse is hovering over this star
-            if star_rect.collidepoint(mouse_x, mouse_y):
-                hover_rating = i + 1
-            
-            # Draw filled or empty stars based on hover
-            if hover_rating is not None and i < hover_rating:
-                screen.blit(star_surface, (star_x, HEIGHT//2))
-            else:
-                screen.blit(empty_star, (star_x, HEIGHT//2))
-        
-        # Show hover message
-        if hover_rating is not None:
-            messages = {
-                1: "Poor",
-                2: "Fair",
-                3: "Good",
-                4: "Great",
-                5: "Amazing!"
-            }
-            hover_text = font.render(messages[hover_rating], True, YELLOW)
-            screen.blit(hover_text, (WIDTH//2 - hover_text.get_width()//2, HEIGHT//2 + 80))
-        
-        pygame.display.flip()
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
-            elif event.type == pygame.KEYDOWN:
-                if event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5]:
-                    rating = event.key - pygame.K_0
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                if hover_rating is not None:
-                    rating = hover_rating
-    
-    return rating
+                if not submitted and not choosing_levels:
+                    # Star rating area
+                    star_x = WIDTH//2 - (max_stars * 50)//2
+                    star_y = HEIGHT//2 - 50
+                    for i in range(max_stars):
+                        star_rect = pygame.Rect(star_x + i * 50, star_y, 40, 40)
+                        if star_rect.collidepoint(mouse_x, mouse_y):
+                            stars = i + 1
+                            sound_manager.play_powerup()  # Play sound when selecting stars
+                
+                # Submit button
+                submit_text = font.render("Submit", True, GREEN)
+                submit_rect = submit_text.get_rect(center=(WIDTH//2, HEIGHT//2 + 50))
+                if submit_rect.collidepoint(mouse_x, mouse_y) and not submitted and not choosing_levels:
+                    submitted = True
+                    sound_manager.play_powerup()
+                    if stars == 5:
+                        choosing_levels = True
+                
+                # Level skip buttons when choosing levels
+                if choosing_levels:
+                    # Increase/decrease level skip buttons
+                    if HEIGHT//2 - 50 <= mouse_y <= HEIGHT//2 + 50:
+                        if WIDTH//2 - 100 <= mouse_x <= WIDTH//2 - 20:  # Left button
+                            skip_levels = max(0, skip_levels - 1)
+                            sound_manager.play_powerup()
+                        elif WIDTH//2 + 20 <= mouse_x <= WIDTH//2 + 100:  # Right button
+                            skip_levels += 1
+                            sound_manager.play_powerup()
+                    
+                    # Confirm button
+                    confirm_text = font.render("Confirm", True, GREEN)
+                    confirm_rect = confirm_text.get_rect(center=(WIDTH//2, HEIGHT//2 + 100))
+                    if confirm_rect.collidepoint(mouse_x, mouse_y):
+                        # Save the level skip value to a file
+                        try:
+                            with open('level_skip.json', 'w') as f:
+                                json.dump({'skip_levels': skip_levels}, f)
+                            game()  # Start the game immediately
+                            return  # Exit the rating screen
+                        except Exception as e:
+                            print(f"Error saving level skip: {e}")
+            
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    if choosing_levels:
+                        choosing_levels = False
+                        submitted = False
+                    else:
+                        running = False
+                elif event.key == pygame.K_RETURN and choosing_levels:
+                    # Save the level skip value to a file
+                    try:
+                        with open('level_skip.json', 'w') as f:
+                            json.dump({'skip_levels': skip_levels}, f)
+                        game()  # Start the game immediately
+                        return  # Exit the rating screen
+                    except Exception as e:
+                        print(f"Error saving level skip: {e}")
+        
+        # Draw title
+        screen.blit(title, (WIDTH//2 - title.get_width()//2, 100))
+        
+        if not choosing_levels:
+            # Draw stars
+            star_x = WIDTH//2 - (max_stars * 50)//2
+            star_y = HEIGHT//2 - 50
+            for i in range(max_stars):
+                if i < stars:
+                    screen.blit(filled_star, (star_x + i * 50, star_y))
+                else:
+                    screen.blit(empty_star, (star_x + i * 50, star_y))
+            
+            if not submitted:
+                # Draw submit button
+                submit_text = font.render("Submit", True, GREEN)
+                screen.blit(submit_text, submit_text.get_rect(center=(WIDTH//2, HEIGHT//2 + 50)))
+            else:
+                # Draw thank you message
+                thank_you = font.render("Thank you for rating!", True, WHITE)
+                screen.blit(thank_you, thank_you.get_rect(center=(WIDTH//2, HEIGHT//2 + 50)))
+        else:
+            # Draw level skip selection
+            skip_title = font.render("Choose Levels to Skip", True, YELLOW)
+            screen.blit(skip_title, skip_title.get_rect(center=(WIDTH//2, HEIGHT//2 - 100)))
+            
+            # Draw decrease/increase buttons and level count
+            pygame.draw.polygon(screen, WHITE, [(WIDTH//2 - 100, HEIGHT//2), 
+                                             (WIDTH//2 - 20, HEIGHT//2 - 50),
+                                             (WIDTH//2 - 20, HEIGHT//2 + 50)], 2)  # Left arrow
+            pygame.draw.polygon(screen, WHITE, [(WIDTH//2 + 100, HEIGHT//2),
+                                             (WIDTH//2 + 20, HEIGHT//2 - 50),
+                                             (WIDTH//2 + 20, HEIGHT//2 + 50)], 2)  # Right arrow
+            
+            level_text = font.render(str(skip_levels), True, WHITE)
+            screen.blit(level_text, level_text.get_rect(center=(WIDTH//2, HEIGHT//2)))
+            
+            # Draw confirm button
+            confirm_text = font.render("Confirm", True, GREEN)
+            screen.blit(confirm_text, confirm_text.get_rect(center=(WIDTH//2, HEIGHT//2 + 100)))
+            
+            # Draw instruction
+            instruction = small_font.render("Press ESC to go back or ENTER to confirm", True, WHITE)
+            screen.blit(instruction, instruction.get_rect(center=(WIDTH//2, HEIGHT - 50)))
+        
+        pygame.display.flip()
 
-# Main game function
+def load_level_skip():
+    """Load the number of levels to skip"""
+    try:
+        if os.path.exists('level_skip.json'):
+            with open('level_skip.json', 'r') as f:
+                data = json.load(f)
+                return data.get('skip_levels', 0)
+    except Exception as e:
+        print(f"Error loading level skip: {e}")
+    return 0
+
+# Update game function to handle level skipping
 def game():
     # Import math here for asteroid polygon generation
     import math
+    import random
     
-    # Level names
-    LEVEL_NAMES = [
-        "Solar Beginnings",        # Level 1
-        "Asteroid Belt",          # Level 2
-        "Nebula Storm",           # Level 3
-        "Cosmic Chaos",           # Level 4
-        "Galactic Gateway",       # Level 5
-        "Supernova Surge",        # Level 6
-        "Black Hole's Edge",      # Level 7
-        "Quantum Quandary",       # Level 8
-        "Dark Matter Domain",     # Level 9
-        "Celestial Citadel",      # Level 10
-        "Pulsar Paradise",        # Level 11
-        "Starborn Sanctuary",     # Level 12
-        "Void Vanguard",          # Level 13
-        "Cosmic Cataclysm",       # Level 14
-        "Universal Ultima",       # Level 15
-        "Neutron Nexus",          # Level 16
-        "Stellar Siege",          # Level 17
-        "Wormhole Warriors",      # Level 18
-        "Plasma Pandemonium",     # Level 19
-        "Meteor Maelstrom",       # Level 20
-        "Quasar Quest",           # Level 21
-        "Gamma Ray Glory",        # Level 22
-        "Cosmic Ray Chaos",       # Level 23
-        "Starship Graveyard",     # Level 24
-        "Temporal Tempest",       # Level 25
-        "Dimensional Drift",      # Level 26
-        "Binary Star Battle",     # Level 27
-        "Magnetar Mayhem",        # Level 28
-        "Cosmic Web Weaver",      # Level 29
-        "Event Horizon",          # Level 30
-        "Galactic Core",          # Level 31
-        "Antimatter Assault",     # Level 32
-        "Hyperspace Haven",       # Level 33
-        "Singularity Storm",      # Level 34
-        "Celestial Symphony",     # Level 35
-        "Quantum Realm",          # Level 36
-        "Cosmic String Theory",   # Level 37
-        "Parallel Universe",      # Level 38
-        "Time Wave Zero",         # Level 39
-        "Multiverse Mayhem",      # Level 40
-        "Cosmic Consciousness",   # Level 41
-        "Infinity's Edge",        # Level 42
-        "Reality Rift",           # Level 43
-        "Dimensional Apex",       # Level 44
-        "Quantum Supremacy",      # Level 45
-        "Universal Nexus",        # Level 46
-        "Cosmic Transcendence",   # Level 47
-        "Eternal Equilibrium",    # Level 48
-        "Ultimate Universe",      # Level 49
-        "Omega Omnipotence"       # Level 50
-    ]
+    # Load level skip value at game start
+    skip_levels = load_level_skip()
     
-    # Get player name
-    player_name = get_player_name()
-    
-    # Select ship
-    ship_img, ship_speed = select_ship()
-    
-    # Create sprite groups
+    # Initialize game objects and variables
+    star_field = StarField()
+    particle_system = ParticleSystem()
     all_sprites = pygame.sprite.Group()
     asteroids = pygame.sprite.Group()
-    enemy_ships = pygame.sprite.Group()
-    player_bullets = pygame.sprite.Group()
+    enemies = pygame.sprite.Group()
+    bullets = pygame.sprite.Group()
     enemy_bullets = pygame.sprite.Group()
     power_ups = pygame.sprite.Group()
-    bombs = pygame.sprite.Group()  # New group for bombs
-    explosions = pygame.sprite.Group()  # New group for explosions
-    
-    # Create player ship
-    player = Ship(ship_img, ship_speed, player_name)
-    all_sprites.add(player)
-    
-    # Level settings
-    level = 1
-    level_score_threshold_delta = 1000  # Score needed to advance to next level
-    level_score_threshold = level_score_threshold_delta
-    asteroid_count = 6
-    enemy_count = 2
-    
-    # Track if we just completed a boss level
-    just_defeated_boss = False
-    
-    # Power-up settings
-    power_up_chance = 0.25  # 25% chance per destroyed object
-    last_power_up_time = pygame.time.get_ticks()
-    power_up_min_delay = 5000  # Minimum 5 seconds between power-ups
-    
-    # Bomb spawn settings
-    bomb_spawn_delay = 5000  # 5 seconds between bomb spawns
-    last_bomb_time = pygame.time.get_ticks()
-    
-    # Create asteroids for initial level
-    for i in range(asteroid_count):
-        a = Asteroid(level)
-        all_sprites.add(a)
-        asteroids.add(a)
-
-    # Create enemy ships for initial level
-    for i in range(enemy_count):
-        e = EnemyShip(level)
-        all_sprites.add(e)
-        enemy_ships.add(e)
-    
-    # Score
-    score = 0
-    font = pygame.font.Font(None, 36)
-    
-    # Game loop
-    clock = pygame.time.Clock()
-    running = True
-    
-    # Level transition variables
-    level_transition = False
-    transition_start_time = 0
-    transition_duration = 1000  # 1 second
-    
-    # Add boss sprite group
+    bombs = pygame.sprite.Group()
+    explosions = pygame.sprite.Group()
     boss_group = pygame.sprite.Group()
     boss_bullets = pygame.sprite.Group()
     
-    # Add level skip option
-    skip_to_50 = False
-    if len(sys.argv) > 1 and sys.argv[1] == "--level50":
-        level = 50
-        skip_to_50 = True
-    else:
-        level = 1
+    # Get player name and select ship
+    player_name = get_player_name()
+    ship_img, ship_speed = select_ship()
     
+    # Create player
+    player = Ship(ship_img, ship_speed, player_name)
+    all_sprites.add(player)
+    
+    # Initialize game state
+    score = 0
+    level = 1 + skip_levels  # Start at skipped level
+    game_over = False
+    game_paused = False
+    level_transition = True  # Start with transition to show skipped level
+    transition_start_time = pygame.time.get_ticks()
+    transition_duration = 1000  # 1 second
+    just_defeated_boss = False
+    
+    # Level settings
+    level_score_threshold = 1000 * level  # Scale threshold with skipped levels
+    asteroid_count = 6 + level  # Scale with level
+    enemy_count = 2 + level // 2  # Add enemy every 2 levels
+    
+    # Clear the level skip after using it
+    try:
+        with open('level_skip.json', 'w') as f:
+            json.dump({'skip_levels': 0}, f)
+    except Exception as e:
+        print(f"Error clearing level skip: {e}")
+    
+    # Create off-screen buffer for better performance
+    buffer_surface = pygame.Surface((WIDTH, HEIGHT))
+    
+    # Set up double buffering
+    pygame.display.set_mode((WIDTH, HEIGHT), pygame.DOUBLEBUF)
+    
+    # Initialize clock
+    clock = pygame.time.Clock()
+    
+    # Main game loop
+    running = True
     while running:
-        # Keep loop running at the right speed
-        clock.tick(60)
-        
-        # Process input (events)
+        # Handle events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
+                    # Kill player when ESC is pressed
                     running = False
-                elif event.key == pygame.K_SPACE and not level_transition:
-                    bullets = player.shoot()
-                    for bullet in bullets:
+                    # Create explosion effect
+                    explosion = Explosion(player.rect.centerx, player.rect.centery)
+                    explosion.radius = 400
+                    explosion.growth_rate = 40
+                    all_sprites.add(explosion)
+                    explosions.add(explosion)
+                    sound_manager.play_explosion()
+                    # Wait for explosion animation
+                    pygame.time.wait(500)
+                elif event.key == pygame.K_SPACE and not game_paused and not level_transition:
+                    # Player shooting
+                    new_bullets = player.shoot()
+                    for bullet in new_bullets:
                         all_sprites.add(bullet)
-                        player_bullets.add(bullet)
+                        bullets.add(bullet)
+                elif event.key == pygame.K_F11:
+                    toggle_fullscreen()
         
-        # Spawn new bomb periodically
-        now = pygame.time.get_ticks()
-        if now - last_bomb_time > bomb_spawn_delay:
-            bomb = StrayBomb(random.randint(0, WIDTH-20), -20)
-            all_sprites.add(bomb)
-            bombs.add(bomb)
-            last_bomb_time = now
-        
-        # Check if we need to advance to the next level
-        if score >= level_score_threshold and not level_transition:
-            level += 1
-            level_transition = True
-            transition_start_time = pygame.time.get_ticks()
-            
-            # Clear existing objects
-            for sprite in [asteroids, enemy_ships, power_ups, bombs]:
-                for obj in sprite:
-                    obj.kill()
-            
-            # Add more asteroids and enemies for the new level
-            asteroid_count = 6 + level  # Scale with level
-            enemy_count = 2 + level // 2  # Add enemy every 2 levels
-            
-            # Update score threshold for next level
-            level_score_threshold = score + level_score_threshold_delta
-            
-            # Reset boss defeat flag when moving to a new level
-            just_defeated_boss = False
+        if game_paused:
+            # Draw pause menu
+            pause_font = pygame.font.Font(None, 74)
+            pause_text = pause_font.render("PAUSED", True, WHITE)
+            screen.blit(pause_text, (WIDTH//2 - pause_text.get_width()//2, HEIGHT//2))
+            pygame.display.flip()
+            continue
         
         # Handle level transition
         if level_transition:
@@ -1439,502 +2010,432 @@ def game():
             if current_time - transition_start_time > transition_duration:
                 level_transition = False
                 
-                # Only spawn regular enemies if it's not a boss level
-                if level % 5 != 0:
-                    # Create new asteroids and enemies for the new level
+                # Spawn boss if it's a boss level
+                if level % 5 == 0 and not boss_group and not just_defeated_boss:
+                    # Clear all enemies and asteroids
+                    for sprite in [asteroids, enemies, power_ups, bombs]:
+                        for obj in sprite:
+                            obj.kill()
+                    
+                    # Create boss
+                    boss = Boss(level)
+                    all_sprites.add(boss)
+                    boss_group.add(boss)
+                    
+                    # Special effects for boss entrance
+                    if level == 50:  # Omega Boss entrance
+                        for _ in range(5):
+                            x = random.randint(0, WIDTH)
+                            y = random.randint(0, HEIGHT//2)
+                            explosion = Explosion(x, y)
+                            explosion.radius = 200
+                            explosion.growth_rate = 30
+                            all_sprites.add(explosion)
+                            explosions.add(explosion)
+                        sound_manager.play_explosion()
+                        pygame.time.wait(100)
+                        sound_manager.play_explosion()
+                    else:
+                        sound_manager.play_explosion()
+                else:
+                    # Spawn regular enemies and asteroids
                     for i in range(asteroid_count):
-                        a = Asteroid(level)
-                        all_sprites.add(a)
-                        asteroids.add(a)
+                        asteroid = Asteroid(level)
+                        all_sprites.add(asteroid)
+                        asteroids.add(asteroid)
                     
                     for i in range(enemy_count):
-                        e = EnemyShip(level)
-                        all_sprites.add(e)
-                        enemy_ships.add(e)
+                        enemy = EnemyShip(level)
+                        all_sprites.add(enemy)
+                        enemies.add(enemy)
         
-        # Check if it's a boss level (every 5 levels)
-        if level % 5 == 0 and not boss_group and not level_transition and not just_defeated_boss:
-            # Clear all enemies and asteroids
-            for sprite in [asteroids, enemy_ships, power_ups, bombs]:
-                for obj in sprite:
-                    obj.kill()
-            # Spawn boss
-            boss = Boss(level)
-            all_sprites.add(boss)
-            boss_group.add(boss)
-            
-            # Special effects for Omega Boss entrance
-            if level == 50:
-                # Create multiple explosion effects
-                for _ in range(5):
-                    x = random.randint(0, WIDTH)
-                    y = random.randint(0, HEIGHT//2)
-                    explosion = Explosion(x, y)
-                    explosion.radius = 200
-                    explosion.growth_rate = 30
-                    all_sprites.add(explosion)
-                    explosions.add(explosion)
-                sound_manager.play_explosion()
-                pygame.time.wait(100)
-                sound_manager.play_explosion()
-            else:
-                sound_manager.play_explosion()  # Normal entrance sound
-            
-            # Modify boss attributes for level 50
-            if level == 50:
-                boss.max_health = 5000  # Much more health
-                boss.health = boss.max_health
-                boss.shoot_delay = 300  # Faster shooting
-                boss.pattern_duration = 2000  # Faster pattern changes
+        # Update game state
+        all_sprites.update()
         
-        # Update boss and handle boss bullets
+        # Enemy shooting
+        for enemy in enemies:
+            bullet = enemy.shoot()
+            if bullet:
+                all_sprites.add(bullet)
+                enemy_bullets.add(bullet)
+        
+        # Boss shooting and updates
         if boss_group:
             # Boss shooting
             for boss in boss_group:
-                new_bullets = boss.shoot(player)  # Pass player reference
+                new_bullets = boss.shoot(player)
                 for bullet in new_bullets:
                     all_sprites.add(bullet)
                     boss_bullets.add(bullet)
             
             # Check for player bullet hits on boss
-            hits = pygame.sprite.groupcollide(boss_group, player_bullets, False, True)
-            for boss, bullets in hits.items():
-                boss.health -= 10 * len(bullets)
-                sound_manager.play_collision()  # Hit sound
+            hits = pygame.sprite.groupcollide(boss_group, bullets, False, True)
+            for boss, bullets_hit in hits.items():
+                boss.health -= 10 * len(bullets_hit)
+                sound_manager.play_collision()
                 
-                # Create small explosion effect for each hit
-                for bullet in bullets:
+                # Create explosion effect for each hit
+                for bullet in bullets_hit:
                     explosion = Explosion(bullet.rect.centerx, bullet.rect.centery)
-                    explosion.radius = 30  # Smaller explosion for hits
+                    explosion.radius = 30
                     explosion.growth_rate = 5
                     explosion.max_frames = 5
                     all_sprites.add(explosion)
-                    
-                    # Chance to spawn power-up from boss hits
-                    now = pygame.time.get_ticks()
-                    if (random.random() < 0.15 and  # 15% chance per hit
-                        now - last_power_up_time > power_up_min_delay):
-                        power_up = PowerUp(bullet.rect.centerx, bullet.rect.centery)
-                        all_sprites.add(power_up)
-                        power_ups.add(power_up)
-                        last_power_up_time = now
+                    explosions.add(explosion)
                 
                 # Check if boss is defeated
                 if boss.health <= 0:
                     boss.kill()
                     # Create massive explosion
                     explosion = Explosion(boss.rect.centerx, boss.rect.centery)
-                    explosion.radius = 400  # Massive explosion
+                    explosion.radius = 400
                     explosion.growth_rate = 40
                     all_sprites.add(explosion)
                     explosions.add(explosion)
                     sound_manager.play_explosion()
-                    boss_bonus = 5000 * (level // 5)  # Big score bonus for defeating boss
+                    
+                    # Check if this was the Omega Boss (Level 50)
+                    if level == 50 and player_name != "0987654321hq":
+                        # Create multiple explosions for epic effect
+                        for _ in range(10):
+                            x = random.randint(0, WIDTH)
+                            y = random.randint(0, HEIGHT)
+                            explosion = Explosion(x, y)
+                            explosion.radius = 300
+                            explosion.growth_rate = 35
+                            all_sprites.add(explosion)
+                            explosions.add(explosion)
+                            sound_manager.play_explosion()
+                            pygame.time.wait(100)
+                        
+                        # Show congratulations message
+                        font_big = pygame.font.Font(None, 74)
+                        font = pygame.font.Font(None, 36)
+                        congrats_text = font_big.render("CONGRATULATIONS!", True, YELLOW)
+                        omega_text = font.render("You have defeated the Omega Boss!", True, WHITE)
+                        reset_text = font.render("The universe will now reset...", True, RED)
+                        
+                        screen.blit(congrats_text, (WIDTH//2 - congrats_text.get_width()//2, HEIGHT//2 - 100))
+                        screen.blit(omega_text, (WIDTH//2 - omega_text.get_width()//2, HEIGHT//2))
+                        screen.blit(reset_text, (WIDTH//2 - reset_text.get_width()//2, HEIGHT//2 + 100))
+                        pygame.display.flip()
+                        pygame.time.wait(5000)  # Wait 5 seconds
+                        
+                        # Reset everything
+                        try:
+                            # Reset total score
+                            with open('total_score.json', 'w') as f:
+                                json.dump({'total_score': 0}, f)
+                            
+                            # Reset shop state
+                            for item in SHOP_ITEMS:
+                                item.purchased = False
+                            
+                            # Reset level skip
+                            with open('level_skip.json', 'w') as f:
+                                json.dump({'skip_levels': 0}, f)
+                            
+                            # Reset high scores
+                            with open('high_scores.json', 'w') as f:
+                                json.dump([], f)
+                            
+                            # Return to main menu
+                            running = False
+                            return score
+                            
+                        except Exception as e:
+                            print(f"Error resetting game state: {e}")
+                    
+                    # Regular boss defeat rewards
+                    boss_bonus = 5000 * (level // 5)
                     score += boss_bonus
                     
-                    # Spawn multiple power-ups when boss is defeated
-                    for _ in range(3):  # Spawn 3 power-ups
+                    # Special message for secret name player passing level 50
+                    if level >= 50 and player_name == "0987654321hq":
+                        font = pygame.font.Font(None, 48)
+                        secret_text = font.render("Secret Mode: Beyond Level 50!", True, PURPLE)
+                        screen.blit(secret_text, (WIDTH//2 - secret_text.get_width()//2, HEIGHT//2))
+                        pygame.display.flip()
+                        pygame.time.wait(2000)
+                    
+                    # Spawn power-ups
+                    for _ in range(3):
                         x = boss.rect.centerx + random.randint(-100, 100)
                         y = boss.rect.centery + random.randint(-100, 100)
                         power_up = PowerUp(x, y)
                         all_sprites.add(power_up)
                         power_ups.add(power_up)
                     
-                    # Set next level threshold right after boss bonus
-                    level_score_threshold = score + level_score_threshold_delta
-                    # Set flag to prevent immediate boss respawn
+                    # Set next level threshold and flag
+                    level_score_threshold = score + 1000
                     just_defeated_boss = True
                     
-                    # Spawn regular enemies for the next level
-                    for i in range(asteroid_count):
-                        a = Asteroid(level)
-                        all_sprites.add(a)
-                        asteroids.add(a)
-                    
-                    for i in range(enemy_count):
-                        e = EnemyShip(level)
-                        all_sprites.add(e)
-                        enemy_ships.add(e)
+                    # Move to next level
+                    level += 1
+                    level_transition = True
+                    transition_start_time = pygame.time.get_ticks()
         
-        # Update sprites if not in level transition
-        if not level_transition:
-            all_sprites.update()
-            
-            # Enemy ships shoot
-            for enemy in enemy_ships:
-                bullet = enemy.shoot()
-                if bullet:
-                    all_sprites.add(bullet)
-                    enemy_bullets.add(bullet)
-            
-            # Check for bomb collisions with all objects and create explosions
-            # Bomb collision with asteroids
-            hits = pygame.sprite.groupcollide(bombs, asteroids, True, True)
-            for bomb in hits:
-                explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
-                all_sprites.add(explosion)
-                explosions.add(explosion)
-                sound_manager.play_explosion()  # Play explosion sound
-                score += 25  # Bonus points for explosion kills
-                a = Asteroid(level)  # Respawn asteroid
-                all_sprites.add(a)
-                asteroids.add(a)
-            
-            # Bomb collision with enemy ships
-            hits = pygame.sprite.groupcollide(bombs, enemy_ships, True, True)
-            for bomb in hits:
-                explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
-                all_sprites.add(explosion)
-                explosions.add(explosion)
-                sound_manager.play_explosion()  # Play explosion sound
-                score += 25  # Bonus points for explosion kills
-                e = EnemyShip(level)  # Respawn enemy ship
-                all_sprites.add(e)
-                enemy_ships.add(e)
-            
-            # Bomb collision with enemy bullets
-            hits = pygame.sprite.groupcollide(bombs, enemy_bullets, True, True)
-            for bomb in hits:
-                explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
-                all_sprites.add(explosion)
-                explosions.add(explosion)
-                sound_manager.play_explosion()  # Play explosion sound
-            
-            # Check for bullet/bomb collisions and create explosions
-            hits = pygame.sprite.groupcollide(bombs, player_bullets, True, True)
-            for bomb in hits:
-                explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
-                all_sprites.add(explosion)
-                explosions.add(explosion)
-                sound_manager.play_explosion()  # Play explosion sound
-                
-                # Check what's caught in explosion radius
-                for sprite_group in [asteroids, enemy_ships, enemy_bullets, power_ups, bombs]:
-                    for sprite in sprite_group:
-                        distance = math.sqrt(
-                            (sprite.rect.centerx - explosion.center_x) ** 2 +
-                            (sprite.rect.centery - explosion.center_y) ** 2
-                        )
-                        if distance <= explosion.radius:
-                            if sprite_group == asteroids or sprite_group == enemy_ships:
-                                score += 25  # Bonus points for explosion kills
-                            sprite.kill()
-            
-            # Check for bullet/asteroid collisions
-            hits = pygame.sprite.groupcollide(asteroids, player_bullets, True, True)
+        # Check for collisions in regular levels
+        if not boss_group:
+            # Player bullet hits asteroid
+            hits = pygame.sprite.groupcollide(asteroids, bullets, True, True)
             for hit in hits:
                 score += 50
-                sound_manager.play_collision()  # Play collision sound
-                
-                # Chance to spawn power-up
-                if (random.random() < power_up_chance and 
-                    now - last_power_up_time > power_up_min_delay):
-                    power_up = PowerUp(hit.rect.centerx, hit.rect.centery)
-                    all_sprites.add(power_up)
-                    power_ups.add(power_up)
-                    last_power_up_time = now
-                
-                a = Asteroid(level)
-                all_sprites.add(a)
-                asteroids.add(a)
+                # Create new asteroid
+                asteroid = Asteroid(level)
+                all_sprites.add(asteroid)
+                asteroids.add(asteroid)
             
-            # Check for bullet/enemy ship collisions
-            hits = pygame.sprite.groupcollide(enemy_ships, player_bullets, True, True)
+            # Player bullet hits enemy
+            hits = pygame.sprite.groupcollide(enemies, bullets, True, True)
             for hit in hits:
                 score += 100
-                sound_manager.play_collision()  # Play collision sound
-                
-                # Chance to spawn power-up
-                if (random.random() < 0.30 and  # 30% chance from enemy ships
-                    now - last_power_up_time > power_up_min_delay):
-                    power_up = PowerUp(hit.rect.centerx, hit.rect.centery)
-                    all_sprites.add(power_up)
-                    power_ups.add(power_up)
-                    last_power_up_time = now
-                
-                e = EnemyShip(level)
-                all_sprites.add(e)
-                enemy_ships.add(e)
-            
-            # Check for player collisions with bombs first
-            bomb_hits = pygame.sprite.spritecollide(player, bombs, True)
-            if bomb_hits and not player.is_invincible:
-                for bomb in bomb_hits:
-                    explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
-                    all_sprites.add(explosion)
-                    explosions.add(explosion)
-                    sound_manager.play_explosion()  # Play explosion sound
-                    
-                    # Check what's caught in explosion radius
-                    for sprite_group in [asteroids, enemy_ships, enemy_bullets, power_ups, bombs]:
-                        for sprite in sprite_group:
-                            distance = math.sqrt(
-                                (sprite.rect.centerx - explosion.center_x) ** 2 +
-                                (sprite.rect.centery - explosion.center_y) ** 2
-                            )
-                            if distance <= explosion.radius:
-                                if sprite_group == asteroids or sprite_group == enemy_ships:
-                                    score += 25  # Bonus points for explosion kills
-                                sprite.kill()
-                running = False
-            elif bomb_hits and player.is_invincible:
-                # Still create explosion but don't end game
-                for bomb in bomb_hits:
-                    explosion = Explosion(bomb.rect.centerx, bomb.rect.centery)
-                    all_sprites.add(explosion)
-                    explosions.add(explosion)
-                    
-                    # Check what's caught in explosion radius (excluding player)
-                    for sprite_group in [asteroids, enemy_ships, enemy_bullets, power_ups, bombs]:
-                        for sprite in sprite_group:
-                            distance = math.sqrt(
-                                (sprite.rect.centerx - explosion.center_x) ** 2 +
-                                (sprite.rect.centery - explosion.center_y) ** 2
-                            )
-                            if distance <= explosion.radius:
-                                if sprite_group == asteroids or sprite_group == enemy_ships:
-                                    score += 25  # Bonus points for explosion kills
-                                sprite.kill()
-            
-            # Check for player/power-up collisions
-            hits = pygame.sprite.spritecollide(player, power_ups, True)
-            for hit in hits:
-                player.add_power_up(hit.type)
-                sound_manager.play_powerup()  # Play power-up collection sound
-            
-            # Check for player collisions with other hazards
-            for hazard_group in [asteroids, enemy_ships, enemy_bullets]:
-                hits = pygame.sprite.spritecollide(player, hazard_group, False)
-                if hits and not player.is_invincible:
-                    sound_manager.play_collision()  # Play collision sound
+                # Create new enemy
+                enemy = EnemyShip(level)
+                all_sprites.add(enemy)
+                enemies.add(enemy)
+        
+        # Check if player is hit
+        if not player.is_invincible:
+            # Check collisions with all hazards
+            for hazard_group in [asteroids, enemies, enemy_bullets, boss_bullets]:
+                if pygame.sprite.spritecollide(player, hazard_group, True):
                     running = False
         
-        # Draw / render
+        # Check for level advancement in regular levels
+        if not boss_group and score >= level_score_threshold and not level_transition:
+            level += 1
+            level_transition = True
+            transition_start_time = pygame.time.get_ticks()
+            
+            # Update level settings
+            level_score_threshold = score + 1000
+            asteroid_count = 6 + level
+            enemy_count = 2 + level // 2
+            
+            # Clear existing enemies and asteroids
+            for sprite in asteroids:
+                sprite.kill()
+            for sprite in enemies:
+                sprite.kill()
+        
+        # Clear screen and draw
         screen.fill(BLACK)
         
-        if level_transition:
-            # Draw level transition screen
-            level_font = pygame.font.Font(None, 72)
-            level_text = level_font.render(f"LEVEL {level}", True, YELLOW)
-            screen.blit(level_text, (WIDTH//2 - level_text.get_width()//2, HEIGHT//2 - 100))
-            
-            # Draw level name
-            level_name = LEVEL_NAMES[min(level - 1, len(LEVEL_NAMES) - 1)]  # Use last name for levels beyond the list
-            name_font = pygame.font.Font(None, 48)
-            name_text = name_font.render(level_name, True, ORANGE)
-            screen.blit(name_text, (WIDTH//2 - name_text.get_width()//2, HEIGHT//2 - 20))
-            
-            # Draw level description
-            desc_font = pygame.font.Font(None, 36)
-            desc_text = desc_font.render("Prepare for the next challenge!", True, WHITE)
-            screen.blit(desc_text, (WIDTH//2 - desc_text.get_width()//2, HEIGHT//2 + 40))
-        else:
-            # Draw game elements
-            all_sprites.draw(screen)
-            
-            # Draw boss health bar if boss exists
-            if boss_group:
-                boss = boss_group.sprites()[0]
-                bar_width = WIDTH - 100
-                bar_height = 20
-                health_percent = boss.health / boss.max_health
-                
-                if level == 50:  # Special health bar for Omega Boss
-                    # Draw boss name with special effects
-                    boss_name = "THE OMEGA BOSS - DESTROYER OF WORLDS"
-                    boss_text = font.render(boss_name, True, (255, 0, 0))
-                    shadow_text = font.render(boss_name, True, (255, 255, 0))
-                    screen.blit(shadow_text, (WIDTH//2 - boss_text.get_width()//2 + 2, 2))
-                    screen.blit(boss_text, (WIDTH//2 - boss_text.get_width()//2, 0))
-                    
-                    # Draw multiple health bars with different colors
-                    colors = [(255, 0, 0), (255, 0, 255), (0, 255, 255)]  # Red, Purple, Cyan
-                    for i, color in enumerate(colors):
-                        y_offset = i * 5
-                        pygame.draw.rect(screen, color, (50, 25 + y_offset, bar_width, 3))
-                        pygame.draw.rect(screen, (255, 255, 255), 
-                                       (50, 25 + y_offset, bar_width * health_percent, 3))
-                else:
-                    # Regular boss health bar
-                    pygame.draw.rect(screen, RED, (50, 5, bar_width, bar_height))
-                    pygame.draw.rect(screen, GREEN, (50, 5, bar_width * health_percent, bar_height))
-                
-                # Adjust other UI elements to appear below the boss health bar
-                score_y = 45
-                name_y = 85
-                powerup_y = 125
-            else:
-                # Normal UI positions when no boss
-                score_y = 10
-                name_y = 50
-                powerup_y = 90
-            
-            # Draw score at top left with adjusted position
-            score_text = font.render(f"Score: {score}", True, WHITE)
-            screen.blit(score_text, (10, score_y))
-            
-            # Draw level name centered at top with adjusted position
-            current_level_name = LEVEL_NAMES[min(level - 1, len(LEVEL_NAMES) - 1)]
-            level_name_text = font.render(current_level_name, True, ORANGE)
-            screen.blit(level_name_text, (WIDTH//2 - level_name_text.get_width()//2, score_y))
-            
-            # Draw level number at top right with adjusted position
-            level_text = font.render(f"Level {level}", True, WHITE)
-            screen.blit(level_text, (WIDTH - level_text.get_width() - 10, score_y))
-            
-            # Draw player name and invincible status with adjusted position
-            name_color = YELLOW if player.is_invincible else WHITE
-            name_text = font.render(f"Player: {player_name}", True, name_color)
-            screen.blit(name_text, (10, name_y))
-            
-            # Draw progress to next level with adjusted position
-            next_level_score = level_score_threshold
-            progress_text = font.render(f"Next level: {score}/{next_level_score}", True, WHITE)
-            screen.blit(progress_text, (WIDTH - progress_text.get_width() - 10, name_y))
-            
-            # Draw active power-ups with icons
-            if player.power_ups:
-                icon_size = 30
-                icon_spacing = 35
-                icon_y = powerup_y
-                icons_per_row = 8
-                
-                # Create and draw power-up icons
-                for i, power_up_type in enumerate(player.power_ups):
-                    row = i // icons_per_row
-                    col = i % icons_per_row
-                    icon_x = 10 + col * icon_spacing
-                    current_y = icon_y + row * icon_spacing
-                    
-                    icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
-                    
-                    if power_up_type == PowerUp.RAPID_FIRE:
-                        points = [(15, 0), (30, 12), (20, 18), (30, 30), (0, 18), (10, 12)]
-                        pygame.draw.polygon(icon, YELLOW, points)
-                    elif power_up_type == PowerUp.DOUBLE_SHOT:
-                        pygame.draw.circle(icon, PURPLE, (8, 15), 7)
-                        pygame.draw.circle(icon, PURPLE, (22, 15), 7)
-                    elif power_up_type == PowerUp.TRIPLE_SHOT:
-                        pygame.draw.circle(icon, RED, (6, 15), 6)
-                        pygame.draw.circle(icon, RED, (15, 8), 6)
-                        pygame.draw.circle(icon, RED, (24, 15), 6)
-                    elif power_up_type == PowerUp.SUPER_RAPID_FIRE:
-                        points1 = [(8, 0), (15, 12), (10, 18), (15, 30), (0, 18), (5, 12)]
-                        points2 = [(23, 0), (30, 12), (25, 18), (30, 30), (15, 18), (20, 12)]
-                        pygame.draw.polygon(icon, (255, 128, 0), points1)
-                        pygame.draw.polygon(icon, (255, 128, 0), points2)
-                    elif power_up_type == PowerUp.RAPID_MOVEMENT:
-                        pygame.draw.polygon(icon, (0, 255, 255), [(0, 15), (12, 8), (12, 22)])
-                        pygame.draw.polygon(icon, (0, 255, 255), [(18, 15), (30, 8), (30, 22)])
-                    
-                    screen.blit(icon, (icon_x, current_y))
-                
-                # Draw power-up timer
-                remaining = (player.power_up_duration - (pygame.time.get_ticks() - player.power_up_start)) // 1000
-                if remaining > 0:
-                    timer_text = font.render(f"{remaining}s", True, YELLOW)
-                    screen.blit(timer_text, (10, icon_y + 35))
+        # Draw starfield first (background)
+        star_field.update(player.velocity_x, player.velocity_y)
+        star_field.draw(screen)
         
-        # Flip the display
+        # Draw particles
+        particle_system.update()
+        particle_system.draw(screen)
+        
+        # Draw all sprites
+        all_sprites.draw(screen)
+        
+        # Draw UI
+        font = pygame.font.Font(None, 36)
+        score_text = font.render(f"Score: {score}", True, WHITE)
+        level_text = font.render(f"Level: {level}", True, WHITE)
+        screen.blit(score_text, (10, 10))
+        screen.blit(level_text, (10, 50))
+        
+        # Draw boss health bar if boss exists
+        for boss in boss_group:
+            # Draw boss health bar
+            health_width = 800
+            health_height = 20
+            health_x = WIDTH//2 - health_width//2
+            health_y = 50
+            
+            # Draw background (empty health)
+            pygame.draw.rect(screen, (64, 64, 64), 
+                           (health_x, health_y, health_width, health_height))
+            
+            # Draw current health
+            current_width = int((boss.health / boss.max_health) * health_width)
+            if boss.is_mega_boss:
+                # Special health bar for mega bosses
+                health_colors = [(255, 0, 0), (255, 165, 0), (255, 255, 0), (0, 255, 0)]
+                segment_width = current_width // len(health_colors)
+                for i, color in enumerate(health_colors):
+                    pygame.draw.rect(screen, color,
+                                   (health_x + i * segment_width, health_y,
+                                    segment_width, health_height))
+            else:
+                pygame.draw.rect(screen, RED,
+                               (health_x, health_y, current_width, health_height))
+        
+        # Draw level transition
+        if level_transition:
+            alpha = min(255, int(255 * (pygame.time.get_ticks() - transition_start_time) / transition_duration))
+            transition_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            transition_surface.fill((0, 0, 0, alpha))
+            
+            # Draw level text
+            level_font = pygame.font.Font(None, 74)
+            if level % 5 == 0:
+                level_text = level_font.render(f"BOSS LEVEL {level}", True, RED)
+            else:
+                level_text = level_font.render(f"LEVEL {level}", True, WHITE)
+            
+            text_rect = level_text.get_rect(center=(WIDTH//2, HEIGHT//2))
+            screen.blit(transition_surface, (0, 0))
+            screen.blit(level_text, text_rect)
+        
+        # Update display
         pygame.display.flip()
+        clock.tick(60)
     
-    # Update high scores
-    high_scores = update_high_scores(player_name, score, level)
+    # Game over - Show rating screen
+    display_rating_screen()
+    return score
+
+# After the high scores functions, add persistent score management
+def load_total_score():
+    """Load the total accumulated score from a file"""
+    try:
+        with open('total_score.json', 'r') as f:
+            data = json.load(f)
+            return data.get('total_score', 0)
+    except:
+        return 0
+
+def save_total_score(score):
+    """Save the total accumulated score to a file"""
+    try:
+        with open('total_score.json', 'w') as f:
+            json.dump({'total_score': score}, f)
+    except Exception as e:
+        print(f"Error saving total score: {e}")
+
+# Add shop items and shop function after the high scores functions
+class ShopItem:
+    def __init__(self, name, description, cost, effect_type, effect_value):
+        self.name = name
+        self.description = description
+        self.cost = cost
+        self.effect_type = effect_type
+        self.effect_value = effect_value
+        self.purchased = False
+
+# Define available shop items
+SHOP_ITEMS = [
+    ShopItem("Speed Boost", "Permanent +2 ship speed", 1000, "speed", 2),
+    ShopItem("Double Points", "Score 2x points from kills", 2000, "score_multiplier", 2),
+    ShopItem("Extra Health", "Take one extra hit before dying", 3000, "health", 1),
+    ShopItem("Rapid Fire", "Shoot faster permanently", 2500, "fire_rate", 1.5),
+    ShopItem("Triple Shot", "Start with triple shot power-up", 5000, "start_powerup", "triple_shot"),
+    ShopItem("Shield", "Start with temporary invincibility", 4000, "shield_time", 5),
+]
+
+def shop_screen():
+    font_title = pygame.font.Font(None, 72)
+    font = pygame.font.Font(None, 36)
     
-    # Game over screen
-    game_over_font = pygame.font.Font(None, 72)
-    game_over_text = game_over_font.render("GAME OVER", True, RED)
-    screen.blit(game_over_text, (WIDTH//2 - game_over_text.get_width()//2, HEIGHT//2 - 150))
+    # Reset all items to unpurchased state
+    for item in SHOP_ITEMS:
+        item.purchased = False
     
-    final_score = font.render(f"Final Score: {score}", True, WHITE)
-    screen.blit(final_score, (WIDTH//2 - final_score.get_width()//2, HEIGHT//2 - 80))
+    title = font_title.render("SHOP", True, YELLOW)
+    total_coins = load_total_score()
     
-    level_reached = font.render(f"Level Reached: {level}", True, WHITE)
-    screen.blit(level_reached, (WIDTH//2 - level_reached.get_width()//2, HEIGHT//2 - 40))
+    selected_item = 0
+    clock = pygame.time.Clock()
+    running = True
     
-    player_name_text = font.render(f"Player: {player_name}", True, WHITE)
-    screen.blit(player_name_text, (WIDTH//2 - player_name_text.get_width()//2, HEIGHT//2))
-    
-    rate_text = font.render("Press SPACE to rate the game", True, YELLOW)
-    screen.blit(rate_text, (WIDTH//2 - rate_text.get_width()//2, HEIGHT//2 + 40))
-    
-    high_score_text = font.render("Press H to view high scores", True, WHITE)
-    screen.blit(high_score_text, (WIDTH//2 - high_score_text.get_width()//2, HEIGHT//2 + 80))
-    
-    restart_text = font.render("Press R to restart or ESC to quit", True, WHITE)
-    screen.blit(restart_text, (WIDTH//2 - restart_text.get_width()//2, HEIGHT//2 + 120))
-    
-    pygame.display.flip()
-    
-    # Wait for player input
-    waiting = True
-    rated = False
-    while waiting:
+    while running:
+        clock.tick(60)
+        screen.fill(BLACK)
+        
+        # Draw title and total coins
+        screen.blit(title, (WIDTH//2 - title.get_width()//2, 50))
+        coins_text = font.render(f"Your Coins: {total_coins}", True, YELLOW)
+        screen.blit(coins_text, (WIDTH//2 - coins_text.get_width()//2, 100))
+        
+        # Draw items
+        for i, item in enumerate(SHOP_ITEMS):
+            y_pos = 200 + i * 60
+            color = YELLOW if i == selected_item else WHITE
+            
+            # Draw selection box
+            if i == selected_item:
+                pygame.draw.rect(screen, color, (WIDTH//4 - 10, y_pos - 5, WIDTH//2 + 20, 50), 2)
+            
+            # Draw item name and cost
+            name_text = font.render(item.name, True, color)
+            cost_text = font.render(f"{item.cost} coins", True, color)
+            status_text = font.render("PURCHASED" if item.purchased else "", True, GREEN)
+            
+            screen.blit(name_text, (WIDTH//4, y_pos))
+            screen.blit(cost_text, (WIDTH//2, y_pos))
+            screen.blit(status_text, (3*WIDTH//4, y_pos))
+            
+            # Draw description
+            if i == selected_item:
+                desc_text = font.render(item.description, True, WHITE)
+                screen.blit(desc_text, (WIDTH//2 - desc_text.get_width()//2, y_pos + 25))
+        
+        # Draw instructions
+        instructions = font.render("↑/↓: Select   ENTER: Buy   ESC: Return", True, WHITE)
+        screen.blit(instructions, (WIDTH//2 - instructions.get_width()//2, HEIGHT - 50))
+        
+        pygame.display.flip()
+        
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE and not rated:
-                    # Show rating screen
-                    rating = display_rating_screen()
-                    rated = True
-                    
-                    # If 5-star rating, offer level 50 shortcut
-                    if rating == 5:
-                        screen.fill(BLACK)
-                        
-                        # Create special effect for the unlock message
-                        unlock_font = pygame.font.Font(None, 60)
-                        unlock_text = unlock_font.render("SPECIAL UNLOCK!", True, YELLOW)
-                        screen.blit(unlock_text, (WIDTH//2 - unlock_text.get_width()//2, HEIGHT//3))
-                        
-                        message_font = pygame.font.Font(None, 36)
-                        message1 = message_font.render("Thanks for the 5-star rating!", True, WHITE)
-                        message2 = message_font.render("You've unlocked a special shortcut to Level 50", True, WHITE)
-                        message3 = message_font.render("Press L to start at Level 50 or R for regular start", True, ORANGE)
-                        
-                        screen.blit(message1, (WIDTH//2 - message1.get_width()//2, HEIGHT//2))
-                        screen.blit(message2, (WIDTH//2 - message2.get_width()//2, HEIGHT//2 + 40))
-                        screen.blit(message3, (WIDTH//2 - message3.get_width()//2, HEIGHT//2 + 80))
-                        
-                        pygame.display.flip()
-                    else:
-                        # Show thank you message for other ratings
-                        screen.fill(BLACK)
-                        thank_you = font.render(f"Thanks for your {rating}-star rating!", True, WHITE)
-                        continue_text = font.render("Press any key to continue", True, WHITE)
-                        
-                        screen.blit(thank_you, (WIDTH//2 - thank_you.get_width()//2, HEIGHT//2))
-                        screen.blit(continue_text, (WIDTH//2 - continue_text.get_width()//2, HEIGHT//2 + 40))
-                        
-                        pygame.display.flip()
-                        
-                        # Wait for key press
-                        waiting_rating = True
-                        while waiting_rating:
-                            for e in pygame.event.get():
-                                if e.type == pygame.KEYDOWN:
-                                    waiting_rating = False
-                                elif e.type == pygame.QUIT:
-                                    pygame.quit()
-                                    sys.exit()
-                
-                elif event.key == pygame.K_r:
-                    waiting = False
-                    game()  # Regular restart
-                elif event.key == pygame.K_l and rated and rating == 5:
-                    waiting = False
-                    # Start new game at level 50
-                    sys.argv = [sys.argv[0], "--level50"]
-                    game()
-                elif event.key == pygame.K_h:
-                    display_high_scores(high_scores)
+                if event.key == pygame.K_UP:
+                    selected_item = (selected_item - 1) % len(SHOP_ITEMS)
+                elif event.key == pygame.K_DOWN:
+                    selected_item = (selected_item + 1) % len(SHOP_ITEMS)
+                elif event.key == pygame.K_RETURN:
+                    # Try to purchase selected item
+                    item = SHOP_ITEMS[selected_item]
+                    if not item.purchased and total_coins >= item.cost:
+                        item.purchased = True
+                        total_coins -= item.cost
+                        save_total_score(total_coins)
+                        # Play power-up sound for purchase
+                        sound_manager.play_powerup()
                 elif event.key == pygame.K_ESCAPE:
-                    pygame.quit()
-                    sys.exit()
+                    running = False
 
-# Start the game
+# Main game loop
 if __name__ == "__main__":
-    welcome_screen()
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Space Shooter")
+    
+    ESC_QUIT_GAME = False
+    PLAYER_NAME = None  # Always start with no player name
+    
+    # Main game loop
+    running = True
+    while running:
+        try:
+            if ESC_QUIT_GAME:
+                break
+            
+            # Always get the name at the start of each game session
+            PLAYER_NAME = get_player_name()
+            if not PLAYER_NAME:
+                break  # Exit if no name provided
+            
+            # Show welcome screen
+            welcome_screen()
+            
+            # Check if user wants to quit
+            if ESC_QUIT_GAME:
+                break
+                
+        except SystemExit:
+            break
+        except Exception as e:
+            print(f"Error occurred: {e}")
+            break
+    
     pygame.quit()
+    sys.exit()
